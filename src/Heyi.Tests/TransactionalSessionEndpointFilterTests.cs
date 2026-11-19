@@ -133,6 +133,24 @@ public class TransactionalSessionEndpointFilterTests
     }
 
     [Test]
+    public async Task Aborted_request_cancels_the_commit()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+            endpoints.MapPost("/orders", (PlaceOrder request) => Results.Created($"/orders/{request.OrderId}", null))
+            .WithTransactionalSession());
+        app.Session.CommitStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var cancellationTokenSource = new CancellationTokenSource();
+        var request = app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(42), cancellationTokenSource.Token);
+        await app.Session.CommitStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cancellationTokenSource.CancelAsync();
+
+        await Assert.ThrowsAsync(Is.InstanceOf<OperationCanceledException>(), () => request);
+        await app.Session.CommitCancelled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.That(app.Session.Committed, Is.False);
+    }
+
+    [Test]
     public async Task Route_groups_are_transactional()
     {
         await using var app = await TestApp.Start(endpoints =>

@@ -29,12 +29,12 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
 
             try
             {
-                // Once the endpoint has run, the commit is not tied to the client connection:
-                // a client that hangs up mid-commit doesn't get to leave the outcome half done.
-                await outgoingMessages.FlushTo(session, CancellationToken.None).ConfigureAwait(false);
-                await session.Commit(CancellationToken.None).ConfigureAwait(false);
+                // A client that hangs up cancels the commit too. The transactional session
+                // guarantees an atomic outcome either way: all of it, or none of it.
+                await outgoingMessages.FlushTo(session, httpContext.RequestAborted).ConfigureAwait(false);
+                await session.Commit(httpContext.RequestAborted).ConfigureAwait(false);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException || !httpContext.RequestAborted.IsCancellationRequested)
             {
                 logger.LogError(exception, "Failed to commit the transactional session for {Method} {Path}.", httpContext.Request.Method, httpContext.Request.Path);
 

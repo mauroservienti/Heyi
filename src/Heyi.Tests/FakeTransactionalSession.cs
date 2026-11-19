@@ -40,15 +40,32 @@ sealed class FakeTransactionalSession : ITransactionalSession
     public Task Publish<T>(Action<T> messageConstructor, PublishOptions publishOptions, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
-    public Task Commit(CancellationToken cancellationToken = default)
+    public TaskCompletionSource? CommitStarted { get; set; }
+    public TaskCompletionSource CommitCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task Commit(CancellationToken cancellationToken = default)
     {
         if (CommitException is not null)
         {
             throw CommitException;
         }
 
+        if (CommitStarted is not null)
+        {
+            // Simulates a slow commit: it completes after a while, unless the request is aborted first.
+            CommitStarted.SetResult();
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                CommitCancelled.SetResult();
+                throw;
+            }
+        }
+
         Committed = true;
-        return Task.CompletedTask;
     }
 
     public void Dispose() => Disposed = true;
