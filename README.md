@@ -73,6 +73,21 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 - A missing or malformed body is a `400`, and nothing is sent. A failed send is a `500` problem details response.
 - They return the `RouteHandlerBuilder`, so validation filters, authorization, and other conventions are added as usual.
 
+### Checking before accepting
+
+Some requests can be turned away before anything is sent, by reading the business's state: a product that's no longer available, an order that has already shipped. `validate` runs before the message is dispatched. It returns `null` to accept the message, or a result, typically a `4xx` problem details response, to reject it:
+
+```csharp
+app.MapCommand<PlaceOrder>("/orders", validate: async (command, httpContext) =>
+    await httpContext.RequestServices.GetRequiredService<IProductCatalog>().IsAvailable(command.ProductId, httpContext.RequestAborted)
+        ? null
+        : TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "The product is no longer available."));
+```
+
+The check reads, it doesn't decide: the state can change right after it, so the message handler still has the final say. Checks make rejections rare, not impossible. If the check needs to store something, it's no longer a check: use an atomic endpoint.
+
+### Retries
+
 Heyi doesn't retry failed sends. [NServiceBus.Extensions.DispatchRetries](https://github.com/mauroservienti/NServiceBus.Extensions.DispatchRetries) is one option for retrying them on the server.
 
 ## Idempotency at the edge
