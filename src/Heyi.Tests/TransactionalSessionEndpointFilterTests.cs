@@ -13,9 +13,9 @@ public class TransactionalSessionEndpointFilterTests
     public async Task Success_status_code_commits_data_and_messages()
     {
         await using var app = await TestApp.Start(endpoints =>
-            endpoints.MapPost("/orders", (PlaceOrder request, IOutgoingMessages messages) =>
+            endpoints.MapPost("/orders", async (PlaceOrder request, IOutgoingMessages messages) =>
             {
-                messages.Publish(new OrderPlaced(request.OrderId));
+                await messages.Publish(new OrderPlaced(request.OrderId));
                 return Results.Created($"/orders/{request.OrderId}", null);
             })
             .WithTransactionalSession());
@@ -51,9 +51,9 @@ public class TransactionalSessionEndpointFilterTests
     public async Task Non_success_status_code_rolls_back(int statusCode)
     {
         await using var app = await TestApp.Start(endpoints =>
-            endpoints.MapPost("/orders", (PlaceOrder request, IOutgoingMessages messages) =>
+            endpoints.MapPost("/orders", async (PlaceOrder request, IOutgoingMessages messages) =>
             {
-                messages.Publish(new OrderPlaced(request.OrderId));
+                await messages.Publish(new OrderPlaced(request.OrderId));
                 return Results.StatusCode(statusCode);
             })
             .WithTransactionalSession());
@@ -62,7 +62,6 @@ public class TransactionalSessionEndpointFilterTests
 
         Assert.That((int)response.StatusCode, Is.EqualTo(statusCode));
         Assert.That(app.Session.Committed, Is.False);
-        Assert.That(app.Session.Operations, Is.Empty);
         Assert.That(app.Session.Disposed, Is.True);
     }
 
@@ -101,9 +100,9 @@ public class TransactionalSessionEndpointFilterTests
     public async Task Exception_rolls_back()
     {
         await using var app = await TestApp.Start(endpoints =>
-            endpoints.MapPost("/orders", IResult (PlaceOrder request, IOutgoingMessages messages) =>
+            endpoints.MapPost("/orders", async Task<IResult> (PlaceOrder request, IOutgoingMessages messages) =>
             {
-                messages.Publish(new OrderPlaced(request.OrderId));
+                await messages.Publish(new OrderPlaced(request.OrderId));
                 throw new InvalidOperationException("Boom");
             })
             .WithTransactionalSession());
@@ -112,7 +111,6 @@ public class TransactionalSessionEndpointFilterTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(42)));
 
         Assert.That(app.Session.Committed, Is.False);
-        Assert.That(app.Session.Operations, Is.Empty);
         Assert.That(app.Session.Disposed, Is.True);
     }
 
@@ -156,9 +154,9 @@ public class TransactionalSessionEndpointFilterTests
         await using var app = await TestApp.Start(endpoints =>
         {
             var orders = endpoints.MapGroup("/orders").WithTransactionalSession();
-            orders.MapPost("/", (PlaceOrder request, IOutgoingMessages messages) =>
+            orders.MapPost("/", async (PlaceOrder request, IOutgoingMessages messages) =>
             {
-                messages.Send(request);
+                await messages.Send(request);
                 return Results.Accepted();
             });
         });
@@ -186,9 +184,9 @@ public class TransactionalSessionEndpointFilterTests
     public async Task Outgoing_messages_outside_a_transactional_endpoint_throw()
     {
         await using var app = await TestApp.Start(endpoints =>
-            endpoints.MapPost("/orders", (PlaceOrder request, IOutgoingMessages messages) =>
+            endpoints.MapPost("/orders", async (PlaceOrder request, IOutgoingMessages messages) =>
             {
-                messages.Publish(new OrderPlaced(request.OrderId));
+                await messages.Publish(new OrderPlaced(request.OrderId));
                 return Results.Ok();
             }));
 

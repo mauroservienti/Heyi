@@ -31,7 +31,6 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
             {
                 // A client that hangs up cancels the commit too. The transactional session
                 // guarantees an atomic outcome either way: all of it, or none of it.
-                await outgoingMessages.FlushTo(session, httpContext.RequestAborted).ConfigureAwait(false);
                 await session.Commit(httpContext.RequestAborted).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !httpContext.RequestAborted.IsCancellationRequested)

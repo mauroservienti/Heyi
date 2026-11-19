@@ -3,46 +3,33 @@ namespace Heyi;
 using NServiceBus;
 using NServiceBus.TransactionalSession;
 
-sealed class OutgoingMessages : IOutgoingMessages
+sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
 {
-    readonly List<Func<ITransactionalSession, CancellationToken, Task>> operations = [];
     bool active;
 
     internal void Activate() => active = true;
 
-    public void Send(object message, SendOptions? options = null)
+    public Task Send(object message, SendOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
         EnsureActive();
-        var sendOptions = options ?? new SendOptions();
-        operations.Add((session, cancellationToken) => session.Send(message, sendOptions, cancellationToken));
+        return session.Send(message, options ?? new SendOptions(), cancellationToken);
     }
 
-    public void SendLocal(object message, SendOptions? options = null)
+    public Task SendLocal(object message, SendOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
         EnsureActive();
         var sendOptions = options ?? new SendOptions();
         sendOptions.RouteToThisEndpoint();
-        operations.Add((session, cancellationToken) => session.Send(message, sendOptions, cancellationToken));
+        return session.Send(message, sendOptions, cancellationToken);
     }
 
-    public void Publish(object message, PublishOptions? options = null)
+    public Task Publish(object message, PublishOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
         EnsureActive();
-        var publishOptions = options ?? new PublishOptions();
-        operations.Add((session, cancellationToken) => session.Publish(message, publishOptions, cancellationToken));
-    }
-
-    internal async Task FlushTo(ITransactionalSession session, CancellationToken cancellationToken)
-    {
-        foreach (var operation in operations)
-        {
-            await operation(session, cancellationToken).ConfigureAwait(false);
-        }
-
-        operations.Clear();
+        return session.Publish(message, options ?? new PublishOptions(), cancellationToken);
     }
 
     void EnsureActive()
