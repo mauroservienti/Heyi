@@ -20,7 +20,7 @@ public class AcceptOnlyEndpointTests
     [SetUp]
     public void NewMessageSession() => messageSession = new FakeMessageSession();
 
-    Task<TestApp> Start(Action<IEndpointRouteBuilder> map, bool addMessageSession = true) =>
+    Task<TestApp> Start(Action<IEndpointRouteBuilder> map, Action<IServiceCollection>? configureServices = null, bool addMessageSession = true) =>
         TestApp.Start(
             map,
             addHeyi: false,
@@ -31,6 +31,8 @@ public class AcceptOnlyEndpointTests
                 {
                     services.AddSingleton<IMessageSession>(messageSession);
                 }
+
+                configureServices?.Invoke(services);
             });
 
     [Test]
@@ -116,28 +118,25 @@ public class AcceptOnlyEndpointTests
     }
 
     [Test]
-    public async Task Validation_that_accepts_dispatches_the_message()
+    public async Task Accepting_check_dispatches_the_message()
     {
-        PlaceOrder? validated = null;
-        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders", validate: (command, _) =>
-        {
-            validated = command;
-            return ValueTask.FromResult<IResult?>(null);
-        }));
+        var checkedMessages = new CheckedMessages();
+        await using var app = await Start(
+            endpoints => endpoints.MapCommand<PlaceOrder>("/orders").WithAcceptanceCheck<AcceptAll>(),
+            services => services.AddSingleton(checkedMessages));
         var orderId = Guid.NewGuid();
 
         using var response = await app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(orderId));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That(validated, Is.EqualTo(new PlaceOrder(orderId)));
+        Assert.That(checkedMessages, Is.EqualTo(new object[] { new PlaceOrder(orderId) }));
         Assert.That(messageSession.SentMessages, Has.Length.EqualTo(1));
     }
 
     [Test]
-    public async Task Validation_that_rejects_returns_its_result_and_sends_nothing()
+    public async Task Rejecting_check_returns_its_response_and_sends_nothing()
     {
-        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders", validate: (_, _) =>
-            ValueTask.FromResult<IResult?>(TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "The order has already shipped."))));
+        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders").WithAcceptanceCheck<AlreadyShipped>());
 
         using var response = await app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(Guid.NewGuid()));
 
@@ -147,10 +146,27 @@ public class AcceptOnlyEndpointTests
     }
 
     [Test]
-    public async Task Validation_can_reject_events_using_the_request()
+    public async Task Checks_run_in_order_and_stop_at_the_first_rejection()
     {
-        await using var app = await Start(endpoints => endpoints.MapEvent<OrderRequested>("/order-requests", validate: (_, httpContext) =>
-            ValueTask.FromResult<IResult?>(httpContext.Request.Headers.ContainsKey("X-Blocked") ? TypedResults.UnprocessableEntity() : null)));
+        var checkedMessages = new CheckedMessages();
+        await using var app = await Start(
+            endpoints => endpoints.MapCommand<PlaceOrder>("/orders")
+                .WithAcceptanceCheck<AcceptAll>()
+                .WithAcceptanceCheck<AlreadyShipped>()
+                .WithAcceptanceCheck<AcceptAll>(),
+            services => services.AddSingleton(checkedMessages));
+
+        using var response = await app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(Guid.NewGuid()));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That(checkedMessages, Has.Count.EqualTo(1));
+        Assert.That(messageSession.SentMessages, Is.Empty);
+    }
+
+    [Test]
+    public async Task Checks_can_reject_events_using_the_request()
+    {
+        await using var app = await Start(endpoints => endpoints.MapEvent<OrderRequested>("/order-requests").WithAcceptanceCheck<BlockedHeader>());
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/order-requests") { Content = JsonContent.Create(new OrderRequested(Guid.NewGuid())) };
         request.Headers.Add("X-Blocked", "yes");
@@ -158,5 +174,50 @@ public class AcceptOnlyEndpointTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.UnprocessableEntity));
         Assert.That(messageSession.PublishedMessages, Is.Empty);
+    }
+
+    [Test]
+    public async Task Check_for_another_message_fails_when_endpoints_are_built()
+    {
+        await using var app = await Start(endpoints => endpoints.MapEvent<OrderRequested>("/order-requests").WithAcceptanceCheck<AlreadyShipped>());
+
+        Assert.That(app.BuildEndpoints, Throws.InvalidOperationException.With.Message.Contains("doesn't accept any of them"));
+    }
+
+    [Test]
+    public async Task Check_that_isnt_an_acceptance_check_fails_when_endpoints_are_built()
+    {
+        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders").WithAcceptanceCheck<CheckedMessages>());
+
+        Assert.That(app.BuildEndpoints, Throws.InvalidOperationException.With.Message.Contains("doesn't implement IAcceptanceCheck<TMessage>"));
+    }
+
+    [Test]
+    public void Rejecting_requires_a_response() =>
+        Assert.That(() => Acceptance.Reject(null!), Throws.ArgumentNullException);
+
+    class CheckedMessages : List<object>;
+
+    class AcceptAll(CheckedMessages checkedMessages) : IAcceptanceCheck<PlaceOrder>
+    {
+        public ValueTask<Acceptance> Check(PlaceOrder message, HttpContext httpContext)
+        {
+            checkedMessages.Add(message);
+            return ValueTask.FromResult(Acceptance.Accept());
+        }
+    }
+
+    class AlreadyShipped : IAcceptanceCheck<PlaceOrder>
+    {
+        public ValueTask<Acceptance> Check(PlaceOrder message, HttpContext httpContext) =>
+            ValueTask.FromResult(Acceptance.Reject(TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "The order has already shipped.")));
+    }
+
+    class BlockedHeader : IAcceptanceCheck<OrderRequested>
+    {
+        public ValueTask<Acceptance> Check(OrderRequested message, HttpContext httpContext) =>
+            ValueTask.FromResult(httpContext.Request.Headers.ContainsKey("X-Blocked")
+                ? Acceptance.Reject(TypedResults.UnprocessableEntity())
+                : Acceptance.Accept());
     }
 }

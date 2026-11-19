@@ -75,14 +75,21 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 
 ### Checking before accepting
 
-Some requests can be turned away before anything is sent, by reading the business's state: a product that's no longer available, an order that has already shipped. `validate` runs before the message is dispatched. It returns `null` to accept the message, or a result, typically a `4xx` problem details response, to reject it:
+Some requests can be turned away before anything is sent, by reading the business's state: a product that's no longer available, an order that has already shipped. An acceptance check runs before the message is dispatched, and either accepts it or rejects it with a response, typically a `4xx` problem details response:
 
 ```csharp
-app.MapCommand<PlaceOrder>("/orders", validate: async (command, httpContext) =>
-    await httpContext.RequestServices.GetRequiredService<IProductCatalog>().IsAvailable(command.ProductId, httpContext.RequestAborted)
-        ? null
-        : TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "The product is no longer available."));
+class ProductIsAvailable(IProductCatalog catalog) : IAcceptanceCheck<PlaceOrder>
+{
+    public async ValueTask<Acceptance> Check(PlaceOrder command, HttpContext httpContext) =>
+        await catalog.IsAvailable(command.ProductId, httpContext.RequestAborted)
+            ? Acceptance.Accept()
+            : Acceptance.Reject(TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "The product is no longer available."));
+}
+
+app.MapCommand<PlaceOrder>("/orders").WithAcceptanceCheck<ProductIsAvailable>();
 ```
+
+Dependencies come in through the constructor, from the request services. Checks run in the order they're added, and the first rejection stops the request. A check for a different message type fails when the endpoints are built.
 
 The check reads, it doesn't decide: the state can change right after it, so the message handler still has the final say. Checks make rejections rare, not impossible. If the check needs to store something, it's no longer a check: use an atomic endpoint.
 
