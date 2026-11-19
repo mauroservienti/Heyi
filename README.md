@@ -16,7 +16,7 @@ app.MapPost("/orders", async (PlaceOrder request, OrdersDbContext db, IOutgoingM
 The endpoint doesn't open, commit, or dispose anything. Heyi does it around the endpoint, on top of the [NServiceBus transactional session](https://docs.particular.net/nservicebus/transactional-session/) and the outbox. Heyi adds the programming model, not the guarantees.
 
 > [!NOTE]
-> Heyi is a work in progress and isn't published on NuGet yet. Atomic endpoints, the EF Core integration, and accept-only endpoints work today; idempotency at the edge is next. The [design document](docs/design.md) describes the planned v1 scope.
+> Heyi is a work in progress and isn't published on NuGet yet. The three v1 features work today: atomic endpoints with the EF Core integration, accept-only endpoints, and idempotency at the edge. The [design document](docs/design.md) describes the planned v1 scope.
 
 ## How it works
 
@@ -71,6 +71,22 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 - They return the `RouteHandlerBuilder`, so validation filters, authorization, and other conventions are added as usual.
 
 Heyi doesn't retry failed sends. [NServiceBus.Extensions.DispatchRetries](https://github.com/mauroservienti/NServiceBus.Extensions.DispatchRetries) is one option for retrying them on the server.
+
+## Idempotency at the edge
+
+Clients retry, proxies retry, users double-click. When a request carries an [`Idempotency-Key`](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) header, Heyi turns it into the identity of the outgoing messages: the n-th message sent while handling the request gets the `{key}/{n}` message ID. A retried request produces messages with the same IDs, and receivers can deduplicate them, for example with the outbox.
+
+```http
+POST /orders
+Idempotency-Key: "8e03978e-40d5-43e8-bc93-6894a57f9324"
+```
+
+- Works for atomic and accept-only endpoints.
+- The IDs are deterministic as long as the endpoint sends its messages in the same order, so avoid sending them concurrently.
+- A message ID set explicitly in the options wins, and still counts as a position.
+- An empty key, or more than one, is a `400` problem details response, and nothing is sent.
+
+Heyi doesn't store responses or deduplicate requests: a retried atomic request runs the endpoint again, so the database must reject the duplicate, for example with a unique constraint.
 
 ## Requirements
 
