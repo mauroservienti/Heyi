@@ -121,11 +121,14 @@ Other persistences expose their own storage sessions; v1 covers SQL persistence 
 - Web applications are usually send-only endpoints, which requires a [remote processor endpoint](https://docs.particular.net/nservicebus/transactional-session/#remote-processor) with the outbox and the transactional session enabled. The docs and samples show both setups.
 - Heyi doesn't host NServiceBus; see [Setup](#setup).
 
-## Open questions
+## Packaging
 
-- Returning messages as values instead of injecting `IOutgoingMessages`, for example `return Http.Created(...).AndPublish(new OrderPlaced(...))`. Easier to test, but needs a custom result type. Not in v1.
-- A class-based endpoint style with attributes, closer to ServiceComposer composition handlers.
-- Package split: a single `Heyi` package, or `Heyi` plus `Heyi.EntityFrameworkCore`.
+One package, `Heyi`, including the EF Core and SQL persistence helper. Splitting it, for example into `Heyi` and `Heyi.EntityFrameworkCore`, can wait until another persistence or data access library needs its own helper.
+
+## Later
+
+- Returning messages as values instead of injecting `IOutgoingMessages`: #4
+- Class-based endpoints with attributes: #5
 
 ## Testing
 
