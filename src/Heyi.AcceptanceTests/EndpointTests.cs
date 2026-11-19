@@ -145,6 +145,34 @@ public class EndpointTests
         await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout);
     }
 
+    [Test]
+    public async Task The_idempotency_key_becomes_the_message_id()
+    {
+        var orderId = Guid.NewGuid();
+        var key = Guid.NewGuid().ToString();
+
+        using var atomicRequest = new HttpRequestMessage(HttpMethod.Post, $"/orders/{orderId}");
+        atomicRequest.Headers.Add("Idempotency-Key", $"\"{key}\"");
+        using var response = await client.SendAsync(atomicRequest);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        Assert.That(await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout), Is.EqualTo($"{key}/0"));
+    }
+
+    [Test]
+    public async Task The_idempotency_key_becomes_the_message_id_of_accepted_messages()
+    {
+        var orderId = Guid.NewGuid();
+        var key = Guid.NewGuid().ToString();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/order-placed-events") { Content = JsonContent.Create(new OrderPlaced(orderId)) };
+        request.Headers.Add("Idempotency-Key", $"\"{key}\"");
+        using var response = await client.SendAsync(request);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        Assert.That(await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout), Is.EqualTo($"{key}/0"));
+    }
+
     static async Task<bool> OrderExists(Guid orderId)
     {
         await using var db = Database.NewOrdersDbContext();
