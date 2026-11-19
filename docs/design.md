@@ -2,6 +2,43 @@
 
 Heyi (合一, héyī, "to become one") turns ASP.NET Core endpoints into handler-shaped endpoints: an endpoint stores data and sends NServiceBus messages as one atomic operation. It builds on the [NServiceBus transactional session](https://docs.particular.net/nservicebus/transactional-session/) and the outbox; Heyi adds the programming model, not the guarantees.
 
+## Setup
+
+NServiceBus comes first, Heyi second. Heyi doesn't configure or host NServiceBus; it relies on an endpoint that's already configured and registered with the standard hosting integration.
+
+1. Configure the NServiceBus endpoint as usual, including what the transactional session needs: a supported persistence with the transactional session enabled, and the outbox.
+
+   ```csharp
+   var endpointConfiguration = new EndpointConfiguration("Sales.Api");
+   endpointConfiguration.UseTransport(new RabbitMQTransport(...))
+       .RouteToEndpoint(typeof(PlaceOrder), "Sales");
+
+   var persistence = endpointConfiguration.UsePersistence<SqlPersistence>();
+   persistence.SqlDialect<SqlDialect.MsSqlServer>();
+   persistence.ConnectionBuilder(() => new SqlConnection(connectionString));
+   persistence.EnableTransactionalSession(new TransactionalSessionOptions { ProcessorEndpoint = "Sales.Api.Processor" });
+
+   endpointConfiguration.EnableOutbox();
+   endpointConfiguration.SendOnly();
+
+   builder.Services.AddNServiceBusEndpoint(endpointConfiguration);
+   ```
+
+2. Add Heyi, then map the endpoints:
+
+   ```csharp
+   builder.Services.AddHeyi(options =>
+       options.OpenSessionOptions(() => new SqlPersistenceOpenSessionOptions()));
+   builder.Services.AddHeyiDbContext<OrdersDbContext>((options, connection) => options.UseSqlServer(connection));
+
+   var app = builder.Build();
+
+   app.MapPost("/orders", ...).WithTransactionalSession();
+   app.MapCommand<CancelOrder>("/orders/cancel");
+   ```
+
+Heyi checks its prerequisites at startup and fails fast with a clear message: no `ITransactionalSession` registered (the transactional session isn't enabled), or no open session options for atomic endpoints. Accept-only endpoints only need the endpoint itself, since they send through `IMessageSession` without the transactional session.
+
 ## Scope for v1
 
 Three features, all in v1:
@@ -81,7 +118,7 @@ Other persistences expose their own storage sessions; v1 covers SQL persistence 
 ## Hosting
 
 - Web applications are usually send-only endpoints, which requires a [remote processor endpoint](https://docs.particular.net/nservicebus/transactional-session/#remote-processor) with the outbox and the transactional session enabled. The docs and samples show both setups.
-- Heyi doesn't host NServiceBus; it expects the endpoint to be registered with the standard hosting integration.
+- Heyi doesn't host NServiceBus; see [Setup](#setup).
 
 ## Open questions
 
