@@ -92,6 +92,7 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 - The request body is bound to the message type and validated with the standard minimal API mechanisms.
 - Routing follows the endpoint's NServiceBus routing configuration; no destinations in the HTTP mapping.
 - The response can carry a location to poll, for example `MapCommand<PlaceOrder>("/orders", accepted: cmd => $"/orders/{cmd.OrderId}")`.
+- If sending fails, the endpoint returns a `500`. Heyi doesn't retry sends itself. One option for retrying them on the server is [NServiceBus.Extensions.DispatchRetries](https://github.com/mauroservienti/NServiceBus.Extensions.DispatchRetries), configured on the NServiceBus endpoint: these endpoints send through `IMessageSession`, so the send goes through the outgoing pipeline it hooks into. It doesn't apply to atomic endpoints, whose commit sends the transactional session's dispatch message directly through the transport.
 
 ### 3. Idempotency at the edge
 
