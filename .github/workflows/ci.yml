@@ -22,8 +22,11 @@ jobs:
         include:
           - os: windows-latest
             name: Windows
+            # GitHub's Windows runners can't run Linux containers
+            test-filter: --filter "TestCategory!=Containers"
           - os: ubuntu-latest
             name: Linux
+            test-filter: ""
       fail-fast: false
     steps:
       - name: Checkout
@@ -37,7 +40,7 @@ jobs:
       - name: Build
         run: dotnet build src --configuration Release
       - name: Tests
-        run: dotnet test src --configuration Release --no-build
+        run: dotnet test src --configuration Release --no-build ${{ matrix.test-filter }}
       - name: Upload packages
         if: matrix.name == 'Linux'
         uses: actions/upload-artifact@v7.0.2
