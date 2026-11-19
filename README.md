@@ -16,7 +16,7 @@ app.MapPost("/orders", async (PlaceOrder request, OrdersDbContext db, IOutgoingM
 The endpoint doesn't open, commit, or dispose anything. Heyi does it around the endpoint, on top of the [NServiceBus transactional session](https://docs.particular.net/nservicebus/transactional-session/) and the outbox. Heyi adds the programming model, not the guarantees.
 
 > [!NOTE]
-> Heyi is a work in progress and isn't published on NuGet yet. Atomic endpoints and the EF Core integration work today; accept-only endpoints and idempotency at the edge are next. The [design document](docs/design.md) describes the planned v1 scope.
+> Heyi is a work in progress and isn't published on NuGet yet. Atomic endpoints, the EF Core integration, and accept-only endpoints work today; idempotency at the edge is next. The [design document](docs/design.md) describes the planned v1 scope.
 
 ## How it works
 
@@ -54,6 +54,23 @@ The open session options can be overridden per endpoint, by passing them to `Wit
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.
 
 Web applications are usually send-only endpoints, which requires a [remote processor endpoint](https://docs.particular.net/nservicebus/transactional-session/#remote-processor) with the outbox and the transactional session enabled.
+
+## Accept-only endpoints
+
+Not every request needs to do the work right away. An accept-only endpoint binds the request body to a message, sends or publishes it, and returns `202 Accepted`; a regular message handler does the work:
+
+```csharp
+app.MapCommand<PlaceOrder>("/orders");           // Send, 202 Accepted
+app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
+```
+
+- No database and no transactional session: only the NServiceBus endpoint.
+- Destinations come from the NServiceBus routing configuration.
+- `location: command => $"/orders/{command.OrderId}"` returns a location to poll.
+- A missing or malformed body is a `400`, and nothing is sent. A failed send is a `500` problem details response.
+- They return the `RouteHandlerBuilder`, so validation filters, authorization, and other conventions are added as usual.
+
+Heyi doesn't retry failed sends. [NServiceBus.Extensions.DispatchRetries](https://github.com/mauroservienti/NServiceBus.Extensions.DispatchRetries) is one option for retrying them on the server.
 
 ## Requirements
 
