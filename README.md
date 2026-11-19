@@ -93,6 +93,16 @@ Dependencies come in through the constructor, from the request services. Checks 
 
 The check reads, it doesn't decide: the state can change right after it, so the message handler still has the final say. Checks make rejections rare, not impossible. If the check needs to store something, it's no longer a check: use an atomic endpoint.
 
+Atomic endpoints can have checks too, when they take the checked type as a parameter, typically the request body. Endpoint filters run in the order they're added, so add the check after `WithTransactionalSession`, or put the endpoint in a transactional route group:
+
+```csharp
+app.MapPost("/orders/{orderId}/returns", async (Guid orderId, ReturnDetails details, RequestsDbContext db, IOutgoingMessages messages) => ...)
+    .WithTransactionalSession()
+    .WithAcceptanceCheck<ItemsWereDelivered>();
+```
+
+The check then runs inside the session: reads through the endpoint's `DbContext` share its transaction, and a rejection rolls back like any other `4xx`. Added before `WithTransactionalSession`, the check runs before the session opens, which saves opening it for rejected requests; the `DbContext` still joins the session's transaction afterwards.
+
 ### Retries
 
 Heyi doesn't retry failed sends. [NServiceBus.Extensions.DispatchRetries](https://github.com/mauroservienti/NServiceBus.Extensions.DispatchRetries) is one option for retrying them on the server.

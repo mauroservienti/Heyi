@@ -4,20 +4,21 @@ using Heyi;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Adds acceptance checks to accept-only endpoints.
+/// Adds acceptance checks to endpoints.
 /// </summary>
 public static class AcceptanceCheckRouteHandlerBuilderExtensions
 {
     /// <summary>
-    /// Runs <typeparamref name="TCheck"/> before the message is dispatched. When it rejects the message,
-    /// its response is returned and nothing is dispatched. Checks run in the order they're added.
+    /// Runs <typeparamref name="TCheck"/> before the endpoint handles the message. When it rejects the message,
+    /// its response is returned and the endpoint doesn't run. Endpoint filters run in the order they're added:
+    /// on a transactional endpoint, add the check after <c>WithTransactionalSession</c> to run it inside the session.
     /// </summary>
     /// <remarks>
-    /// <typeparamref name="TCheck"/> must implement <see cref="IAcceptanceCheck{TMessage}"/> for the endpoint's message type;
-    /// otherwise, building the endpoint fails. The check is resolved from the request services if registered,
+    /// <typeparamref name="TCheck"/> must implement <see cref="IAcceptanceCheck{TMessage}"/> for the type of one of
+    /// the endpoint's parameters; otherwise, building the endpoint fails. The check is resolved from the request services if registered,
     /// or created with its constructor dependencies resolved from them.
     /// </remarks>
-    /// <param name="builder">The accept-only endpoint, as returned by <c>MapCommand</c> or <c>MapEvent</c>.</param>
+    /// <param name="builder">The endpoint, for example as returned by <c>MapCommand</c>, <c>MapEvent</c>, or <c>MapPost</c>.</param>
     public static RouteHandlerBuilder WithAcceptanceCheck<TCheck>(this RouteHandlerBuilder builder)
         where TCheck : class
     {
@@ -50,7 +51,7 @@ public static class AcceptanceCheckRouteHandlerBuilderExtensions
 
             throw new InvalidOperationException(
                 $"{typeof(TCheck).FullName} checks {string.Join(", ", messageTypes.Select(type => type.FullName))}, " +
-                "but the endpoint doesn't accept any of them. Add the check to the MapCommand or MapEvent of the message it checks.");
+                "but the endpoint doesn't accept any of them. Add the check to an endpoint with a parameter of the type it checks.");
         });
 
         return builder;

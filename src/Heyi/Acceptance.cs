@@ -22,12 +22,12 @@ public sealed class Acceptance
     public bool IsAccepted => Rejection is null;
 
     /// <summary>
-    /// Accepts the message: the next check runs, or the message is dispatched.
+    /// Accepts the message: the next check runs, or the endpoint does.
     /// </summary>
     public static Acceptance Accept() => accepted;
 
     /// <summary>
-    /// Rejects the message: <paramref name="response"/> is returned, typically a <c>4xx</c> problem details response, and nothing is dispatched.
+    /// Rejects the message: <paramref name="response"/> is returned, typically a <c>4xx</c> problem details response, and the endpoint doesn't run.
     /// </summary>
     /// <param name="response">The response to return.</param>
     public static Acceptance Reject(IResult response)
