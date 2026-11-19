@@ -37,7 +37,7 @@ NServiceBus comes first, Heyi second. Heyi doesn't configure or host NServiceBus
    app.MapCommand<CancelOrder>("/orders/cancel");
    ```
 
-Heyi checks its prerequisites at startup and fails fast with a clear message: no `ITransactionalSession` registered (the transactional session isn't enabled), or no open session options for atomic endpoints. Accept-only endpoints only need the endpoint itself, since they send through `IMessageSession` without the transactional session.
+Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message: no `ITransactionalSession` registered (the transactional session isn't enabled), or no open session options for atomic endpoints. Accept-only endpoints only need the endpoint itself, since they send through `IMessageSession` without the transactional session.
 
 ## Scope for v1
 
@@ -67,7 +67,8 @@ Rules:
 - The filter opens the `ITransactionalSession` before the endpoint runs.
 - The session is committed after the endpoint returns and before the response is written. A failed commit must never produce a success response; it becomes a `500` problem details response.
 - Only success status codes (`2xx`) commit. An exception or a `4xx`/`5xx` result disposes the session, which rolls back data and messages.
-- `IOutgoingMessages` is a request-scoped facade over the open session (`Send`, `SendLocal`, `Publish`). Endpoint code never opens, commits, or disposes anything.
+- `IOutgoingMessages` is a request-scoped collector (`Send`, `SendLocal`, `Publish`). Its methods are synchronous: messages are handed to the session only when the endpoint returns a success status code, right before the commit. Endpoint code never opens, commits, or disposes anything, and using `IOutgoingMessages` outside a transactional endpoint throws instead of silently dropping messages.
+- The status code comes from the returned result, including nested results such as `Results<Created, BadRequest>`, and falls back to the response status code for plain return values.
 - Route groups work too: `app.MapGroup("/orders").WithTransactionalSession()`.
 
 Persistence-specific open options are registered once, with a per-endpoint override:
