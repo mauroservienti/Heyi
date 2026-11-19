@@ -23,7 +23,8 @@ sealed class TestApp : IAsyncDisposable
         Action<IEndpointRouteBuilder> map,
         Action<HeyiOptions>? configureHeyi = null,
         bool addHeyi = true,
-        bool addTransactionalSession = true)
+        bool addTransactionalSession = true,
+        Action<IServiceCollection>? configureServices = null)
     {
         var session = new FakeTransactionalSession();
         var builder = WebApplication.CreateSlimBuilder();
@@ -38,6 +39,8 @@ sealed class TestApp : IAsyncDisposable
         {
             builder.Services.AddHeyi(configureHeyi ?? (options => options.OpenSessionOptions(() => new TestOpenSessionOptions())));
         }
+
+        configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
         map(app);
