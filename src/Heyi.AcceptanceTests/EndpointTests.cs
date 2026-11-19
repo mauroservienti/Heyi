@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -13,7 +14,7 @@ namespace Heyi.AcceptanceTests;
 
 [TestFixture]
 [Category("Containers")]
-public class AtomicEndpointTests
+public class EndpointTests
 {
     static readonly TimeSpan MessageTimeout = TimeSpan.FromSeconds(30);
     static readonly TimeSpan NoMessageWindow = TimeSpan.FromSeconds(5);
@@ -80,6 +81,8 @@ public class AtomicEndpointTests
         })
         .WithTransactionalSession();
 
+        app.MapEvent<OrderPlaced>("/order-placed-events");
+
         await app.StartAsync();
         client = app.GetTestClient();
     }
@@ -129,6 +132,17 @@ public class AtomicEndpointTests
 
         Assert.That(await OrderExists(orderId), Is.False);
         Assert.That(await WasReceivedWithin(orderId, NoMessageWindow), Is.False);
+    }
+
+    [Test]
+    public async Task An_accept_only_endpoint_publishes_the_body()
+    {
+        var orderId = Guid.NewGuid();
+
+        using var response = await client.PostAsJsonAsync("/order-placed-events", new OrderPlaced(orderId));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout);
     }
 
     static async Task<bool> OrderExists(Guid orderId)
