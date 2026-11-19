@@ -14,11 +14,17 @@ sealed class FakeTransactionalSession : ITransactionalSession
     public List<(object Message, string Kind, ExtendableOptions Options)> Operations { get; } = [];
 
     public string SessionId { get; } = Guid.NewGuid().ToString();
-    public ISynchronizedStorageSession SynchronizedStorageSession => throw new NotSupportedException();
+    // Like SQL persistence, the storage session and its transaction start when the session is opened.
+    public Func<FakeSqlStorageSession>? StorageSessionFactory { get; set; }
+    public FakeSqlStorageSession? StorageSession { get; private set; }
+
+    public ISynchronizedStorageSession SynchronizedStorageSession =>
+        StorageSession ?? (ISynchronizedStorageSession)new NonSqlStorageSession();
 
     public Task Open(OpenSessionOptions options, CancellationToken cancellationToken = default)
     {
         OpenedWith = options;
+        StorageSession = StorageSessionFactory?.Invoke();
         return Task.CompletedTask;
     }
 
@@ -65,17 +71,28 @@ sealed class FakeTransactionalSession : ITransactionalSession
             }
         }
 
+        if (StorageSession is not null)
+        {
+            await StorageSession.Commit(cancellationToken);
+        }
+
         Committed = true;
     }
 
-    public void Dispose() => Disposed = true;
+    public void Dispose()
+    {
+        StorageSession?.Dispose();
+        Disposed = true;
+    }
 
     public ValueTask DisposeAsync()
     {
-        Disposed = true;
+        Dispose();
         return ValueTask.CompletedTask;
     }
 }
+
+sealed class NonSqlStorageSession : ISynchronizedStorageSession;
 
 sealed class TestOpenSessionOptions : OpenSessionOptions
 {

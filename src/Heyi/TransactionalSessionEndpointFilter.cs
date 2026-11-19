@@ -17,6 +17,12 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
         try
         {
             await session.Open(openSessionOptions(), httpContext.RequestAborted).ConfigureAwait(false);
+
+            foreach (var enlistment in httpContext.RequestServices.GetServices<IStorageSessionEnlistment>())
+            {
+                enlistment.Enlist(session);
+            }
+
             outgoingMessages.Activate();
 
             var result = await next(context).ConfigureAwait(false);
