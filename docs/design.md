@@ -11,7 +11,7 @@ NServiceBus comes first, Heyi second. Heyi doesn't configure or host NServiceBus
    ```csharp
    var endpointConfiguration = new EndpointConfiguration("Sales.Api");
    endpointConfiguration.UseTransport(new RabbitMQTransport(...))
-       .RouteToEndpoint(typeof(PlaceOrder), "Sales");
+       .RouteToEndpoint(typeof(CancelOrder), "Sales");
 
    var persistence = endpointConfiguration.UsePersistence<SqlPersistence>();
    persistence.SqlDialect<SqlDialect.MsSqlServer>();
@@ -29,13 +29,13 @@ NServiceBus comes first, Heyi second. Heyi doesn't configure or host NServiceBus
    ```csharp
    builder.Services.AddHeyi(options =>
        options.OpenSessionOptions(() => new SqlPersistenceOpenSessionOptions()));
-   builder.Services.AddDbContext<OrdersDbContext>(options => options.UseSqlServer(connectionString));
-   builder.Services.AddHeyiDbContext<OrdersDbContext>();
+   builder.Services.AddDbContext<RequestsDbContext>(options => options.UseSqlServer(connectionString));
+   builder.Services.AddHeyiDbContext<RequestsDbContext>();
 
    var app = builder.Build();
 
-   app.MapPost("/orders", ...).WithTransactionalSession();
-   app.MapCommand<CancelOrder>("/orders/cancel");
+   app.MapPost("/orders/{orderId}/cancellations", ...).WithTransactionalSession();
+   app.MapCommand<PlaceOrder>("/orders");
    ```
 
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message: no `ITransactionalSession` registered (the transactional session isn't enabled), or no open session options for atomic endpoints. Accept-only endpoints only need the endpoint itself, since they send through `IMessageSession` without the transactional session; without it, they fail fast the same way.
@@ -50,15 +50,17 @@ Three features, all in v1:
 
 ### 1. Atomic endpoints
 
+Atomic endpoints are for task-based applications: the endpoint records the task users follow, such as a cancellation request, and sends the message that starts the work, as one operation. The endpoint doesn't run business logic; a message handler does. For everything else, accept-only endpoints are the default.
+
 Minimal API endpoints opt in with an endpoint filter:
 
 ```csharp
-app.MapPost("/orders", async (PlaceOrder request, OrdersDbContext db, IOutgoingMessages messages) =>
+app.MapPost("/orders/{orderId}/cancellations", async (Guid orderId, RequestsDbContext db, IOutgoingMessages messages) =>
 {
-    var order = Order.From(request);
-    db.Orders.Add(order);
-    await messages.Publish(new OrderPlaced(order.Id));
-    return Results.Created($"/orders/{order.Id}", order);
+    var cancellation = new CancellationRequest(orderId);
+    db.CancellationRequests.Add(cancellation);
+    await messages.Send(new CancelOrder(orderId, cancellation.Id));
+    return Results.Accepted($"/cancellations/{cancellation.Id}", cancellation);
 })
 .WithTransactionalSession();
 ```
@@ -70,7 +72,7 @@ Rules:
 - Only success status codes (`2xx`) commit. An exception or a `4xx`/`5xx` result disposes the session, which rolls back data and messages.
 - `IOutgoingMessages` is a request-scoped facade over the open session (`Send`, `SendLocal`, `Publish`), asynchronous like the rest of the NServiceBus API, so errors surface where the message is sent. Endpoint code never opens, commits, or disposes anything, and using `IOutgoingMessages` outside a transactional endpoint throws.
 - The status code comes from the returned result, including nested results such as `Results<Created, BadRequest>`, and falls back to the response status code for plain return values.
-- Route groups work too: `app.MapGroup("/orders").WithTransactionalSession()`.
+- Route groups work too: `app.MapGroup("/orders/{orderId}").WithTransactionalSession()`.
 
 Persistence-specific open options are registered once, with a per-endpoint override:
 
@@ -78,7 +80,7 @@ Persistence-specific open options are registered once, with a per-endpoint overr
 builder.Services.AddHeyi(options =>
     options.OpenSessionOptions(() => new SqlPersistenceOpenSessionOptions()));
 
-app.MapPost("/orders", ...)
+app.MapPost("/orders/{orderId}/cancellations", ...)
     .WithTransactionalSession(() => new SqlPersistenceOpenSessionOptions { MaximumCommitDuration = TimeSpan.FromSeconds(30) });
 ```
 
@@ -95,6 +97,7 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 - `MapCommand` and `MapEvent` return the `RouteHandlerBuilder`, so validation filters, authorization, and other conventions are added as usual.
 - Routing follows the endpoint's NServiceBus routing configuration; no destinations in the HTTP mapping.
 - The response can carry a location to poll, for example `MapCommand<PlaceOrder>("/orders", location: command => $"/orders/{command.OrderId}")`.
+- `validate: (message, httpContext) => ...` checks the message before it's dispatched, for example against a read model: `null` accepts it, a result rejects it and nothing is sent. The check isn't atomic with the send and reads state that can change, so the message handler still decides; upfront checks make rejections rare, as described in ["What if my command was rejected?"](https://milestone.topics.it/2023/06/27/reject-commands.html). It's an endpoint filter with typed access to the message, so it doesn't depend on the handler's argument positions.
 - If sending fails, the endpoint returns a `500` problem details response. Heyi doesn't retry sends itself. One option for retrying them on the server is [NServiceBus.Extensions.DispatchRetries](https://github.com/mauroservienti/NServiceBus.Extensions.DispatchRetries), configured on the NServiceBus endpoint: these endpoints send through `IMessageSession`, so the send goes through the outgoing pipeline it hooks into. It doesn't apply to atomic endpoints, whose commit sends the transactional session's dispatch message directly through the transport.
 
 ### 3. Idempotency at the edge
@@ -114,8 +117,8 @@ An `Idempotency-Key` request header (see the [IETF draft](https://datatracker.ie
 The endpoint's data access must share the transactional session's connection and transaction. For EF Core with SQL persistence, Heyi does what the [Particular sample](https://docs.particular.net/samples/transactional-session/aspnetcore-webapi/) does by hand. The context is registered as usual, then Heyi is told about it:
 
 ```csharp
-builder.Services.AddDbContext<OrdersDbContext>(options => options.UseSqlServer(connectionString));
-builder.Services.AddHeyiDbContext<OrdersDbContext>();
+builder.Services.AddDbContext<RequestsDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.AddHeyiDbContext<RequestsDbContext>();
 ```
 
 - Inside a transactional endpoint, right after opening the session, Heyi switches the request's context to the session's `ISqlStorageSession` connection and transaction, and registers `SaveChangesAsync` to run right before the commit.

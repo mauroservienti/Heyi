@@ -3,17 +3,17 @@
 Heyi (合一, héyī, "to become one") turns ASP.NET Core minimal API endpoints into handler-shaped endpoints: an endpoint stores data and sends NServiceBus messages as one atomic operation.
 
 ```csharp
-app.MapPost("/orders", async (PlaceOrder request, OrdersDbContext db, IOutgoingMessages messages) =>
+app.MapPost("/orders/{orderId}/cancellations", async (Guid orderId, RequestsDbContext db, IOutgoingMessages messages) =>
 {
-    var order = Order.From(request);
-    db.Orders.Add(order);
-    await messages.Publish(new OrderPlaced(order.Id));
-    return Results.Created($"/orders/{order.Id}", order);
+    var cancellation = new CancellationRequest(orderId);
+    db.CancellationRequests.Add(cancellation);
+    await messages.Send(new CancelOrder(orderId, cancellation.Id));
+    return Results.Accepted($"/cancellations/{cancellation.Id}", cancellation);
 })
 .WithTransactionalSession();
 ```
 
-The endpoint doesn't open, commit, or dispose anything. Heyi does it around the endpoint, on top of the [NServiceBus transactional session](https://docs.particular.net/nservicebus/transactional-session/) and the outbox. Heyi adds the programming model, not the guarantees.
+The endpoint records the cancellation request, the task users can check on, and sends the message that starts the work: both, or neither. It doesn't open, commit, or dispose anything. Heyi does it around the endpoint, on top of the [NServiceBus transactional session](https://docs.particular.net/nservicebus/transactional-session/) and the outbox. Heyi adds the programming model, not the guarantees.
 
 > [!NOTE]
 > Heyi is a work in progress and isn't published on NuGet yet. The three v1 features work today: atomic endpoints with the EF Core integration, accept-only endpoints, and idempotency at the edge. The [design document](docs/design.md) describes the planned v1 scope.
@@ -36,17 +36,18 @@ NServiceBus comes first, Heyi second. Heyi doesn't configure or host NServiceBus
 builder.Services.AddHeyi(options =>
     options.OpenSessionOptions(() => new SqlPersistenceOpenSessionOptions()));
 
-builder.Services.AddDbContext<OrdersDbContext>(options => options.UseSqlServer(connectionString));
-builder.Services.AddHeyiDbContext<OrdersDbContext>();
+builder.Services.AddDbContext<RequestsDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.AddHeyiDbContext<RequestsDbContext>();
 ```
 
 Mark endpoints, or whole route groups, as transactional:
 
 ```csharp
-app.MapPost("/orders", ...).WithTransactionalSession();
+app.MapPost("/orders/{orderId}/cancellations", ...).WithTransactionalSession();
 
-var orders = app.MapGroup("/orders").WithTransactionalSession();
-orders.MapPost("/{id}/cancel", ...);
+var order = app.MapGroup("/orders/{orderId}").WithTransactionalSession();
+order.MapPost("/cancellations", ...);
+order.MapPost("/returns", ...);
 ```
 
 The open session options can be overridden per endpoint, by passing them to `WithTransactionalSession`.
@@ -57,7 +58,9 @@ Web applications are usually send-only endpoints, which requires a [remote proce
 
 ## Accept-only endpoints
 
-Not every request needs to do the work right away. An accept-only endpoint binds the request body to a message, sends or publishes it, and returns `202 Accepted`; a regular message handler does the work:
+HTTP endpoints shouldn't run business logic: a message handler runs it with retries, the outbox, and everything else messaging offers. Atomic endpoints are for task-based applications, where the task users follow must be created together with the message that starts the work. For everything else, use accept-only endpoints.
+
+An accept-only endpoint binds the request body to a message, sends or publishes it, and returns `202 Accepted`; a regular message handler does the work:
 
 ```csharp
 app.MapCommand<PlaceOrder>("/orders");           // Send, 202 Accepted
@@ -70,6 +73,21 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 - A missing or malformed body is a `400`, and nothing is sent. A failed send is a `500` problem details response.
 - They return the `RouteHandlerBuilder`, so validation filters, authorization, and other conventions are added as usual.
 
+### Checking before accepting
+
+Some requests can be turned away before anything is sent, by reading the business's state: a product that's no longer available, an order that has already shipped. `validate` runs before the message is dispatched. It returns `null` to accept the message, or a result, typically a `4xx` problem details response, to reject it:
+
+```csharp
+app.MapCommand<PlaceOrder>("/orders", validate: async (command, httpContext) =>
+    await httpContext.RequestServices.GetRequiredService<IProductCatalog>().IsAvailable(command.ProductId, httpContext.RequestAborted)
+        ? null
+        : TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "The product is no longer available."));
+```
+
+The check reads, it doesn't decide: the state can change right after it, so the message handler still has the final say. Checks make rejections rare, not impossible. If the check needs to store something, it's no longer a check: use an atomic endpoint.
+
+### Retries
+
 Heyi doesn't retry failed sends. [NServiceBus.Extensions.DispatchRetries](https://github.com/mauroservienti/NServiceBus.Extensions.DispatchRetries) is one option for retrying them on the server.
 
 ## Idempotency at the edge
@@ -77,7 +95,7 @@ Heyi doesn't retry failed sends. [NServiceBus.Extensions.DispatchRetries](https:
 Clients retry, proxies retry, users double-click. When a request carries an [`Idempotency-Key`](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) header, Heyi turns it into the identity of the outgoing messages: the n-th message sent while handling the request gets the `{key}/{n}` message ID. A retried request produces messages with the same IDs, and receivers can deduplicate them, for example with the outbox.
 
 ```http
-POST /orders
+POST /orders/1234/cancellations
 Idempotency-Key: "8e03978e-40d5-43e8-bc93-6894a57f9324"
 ```
 

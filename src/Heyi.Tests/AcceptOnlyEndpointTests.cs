@@ -3,6 +3,7 @@ namespace Heyi.Tests;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using NServiceBus;
@@ -112,5 +113,50 @@ public class AcceptOnlyEndpointTests
         await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders"), addMessageSession: false);
 
         Assert.That(app.BuildEndpoints, Throws.InvalidOperationException.With.Message.Contains("AddNServiceBusEndpoint"));
+    }
+
+    [Test]
+    public async Task Validation_that_accepts_dispatches_the_message()
+    {
+        PlaceOrder? validated = null;
+        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders", validate: (command, _) =>
+        {
+            validated = command;
+            return ValueTask.FromResult<IResult?>(null);
+        }));
+        var orderId = Guid.NewGuid();
+
+        using var response = await app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(orderId));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        Assert.That(validated, Is.EqualTo(new PlaceOrder(orderId)));
+        Assert.That(messageSession.SentMessages, Has.Length.EqualTo(1));
+    }
+
+    [Test]
+    public async Task Validation_that_rejects_returns_its_result_and_sends_nothing()
+    {
+        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders", validate: (_, _) =>
+            ValueTask.FromResult<IResult?>(TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "The order has already shipped."))));
+
+        using var response = await app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(Guid.NewGuid()));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That(response.Content.Headers.ContentType?.MediaType, Is.EqualTo("application/problem+json"));
+        Assert.That(messageSession.SentMessages, Is.Empty);
+    }
+
+    [Test]
+    public async Task Validation_can_reject_events_using_the_request()
+    {
+        await using var app = await Start(endpoints => endpoints.MapEvent<OrderRequested>("/order-requests", validate: (_, httpContext) =>
+            ValueTask.FromResult<IResult?>(httpContext.Request.Headers.ContainsKey("X-Blocked") ? TypedResults.UnprocessableEntity() : null)));
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/order-requests") { Content = JsonContent.Create(new OrderRequested(Guid.NewGuid())) };
+        request.Headers.Add("X-Blocked", "yes");
+        using var response = await app.CreateClient().SendAsync(request);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.UnprocessableEntity));
+        Assert.That(messageSession.PublishedMessages, Is.Empty);
     }
 }
