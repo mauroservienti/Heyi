@@ -52,11 +52,11 @@ Three features, all in v1:
 Minimal API endpoints opt in with an endpoint filter:
 
 ```csharp
-app.MapPost("/orders", (PlaceOrder request, OrdersDbContext db, IOutgoingMessages messages) =>
+app.MapPost("/orders", async (PlaceOrder request, OrdersDbContext db, IOutgoingMessages messages) =>
 {
     var order = Order.From(request);
     db.Orders.Add(order);
-    messages.Publish(new OrderPlaced(order.Id));
+    await messages.Publish(new OrderPlaced(order.Id));
     return Results.Created($"/orders/{order.Id}", order);
 })
 .WithTransactionalSession();
@@ -67,7 +67,7 @@ Rules:
 - The filter opens the `ITransactionalSession` before the endpoint runs.
 - The session is committed after the endpoint returns and before the response is written. A failed commit must never produce a success response; it becomes a `500` problem details response.
 - Only success status codes (`2xx`) commit. An exception or a `4xx`/`5xx` result disposes the session, which rolls back data and messages.
-- `IOutgoingMessages` is a request-scoped collector (`Send`, `SendLocal`, `Publish`). Its methods are synchronous: messages are handed to the session only when the endpoint returns a success status code, right before the commit. Endpoint code never opens, commits, or disposes anything, and using `IOutgoingMessages` outside a transactional endpoint throws instead of silently dropping messages.
+- `IOutgoingMessages` is a request-scoped facade over the open session (`Send`, `SendLocal`, `Publish`), asynchronous like the rest of the NServiceBus API, so errors surface where the message is sent. Endpoint code never opens, commits, or disposes anything, and using `IOutgoingMessages` outside a transactional endpoint throws.
 - The status code comes from the returned result, including nested results such as `Results<Created, BadRequest>`, and falls back to the response status code for plain return values.
 - Route groups work too: `app.MapGroup("/orders").WithTransactionalSession()`.
 
