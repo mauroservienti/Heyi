@@ -14,6 +14,11 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
         var session = httpContext.RequestServices.GetRequiredService<ITransactionalSession>();
         var outgoingMessages = httpContext.RequestServices.GetRequiredService<OutgoingMessages>();
 
+        if (!IdempotencyKey.TryRead(httpContext.Request, out var idempotencyKey))
+        {
+            return IdempotencyKey.Invalid();
+        }
+
         try
         {
             await session.Open(openSessionOptions(), httpContext.RequestAborted).ConfigureAwait(false);
@@ -23,7 +28,7 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
                 enlistment.Enlist(session);
             }
 
-            outgoingMessages.Activate();
+            outgoingMessages.Activate(idempotencyKey);
 
             var result = await next(context).ConfigureAwait(false);
 

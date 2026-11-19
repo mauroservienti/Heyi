@@ -1,5 +1,6 @@
 namespace Microsoft.AspNetCore.Builder;
 
+using Heyi;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +23,12 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
     /// <param name="location">Builds the location to poll, returned in the <c>Location</c> header.</param>
     public static RouteHandlerBuilder MapCommand<TCommand>(this IEndpointRouteBuilder endpoints, string pattern, Func<TCommand, string>? location = null)
         where TCommand : class =>
-        endpoints.MapAccepted(pattern, location, (session, command, cancellationToken) => session.Send(command, new SendOptions(), cancellationToken));
+        endpoints.MapAccepted(pattern, location, (session, command, idempotencyKey, cancellationToken) =>
+        {
+            var options = new SendOptions();
+            idempotencyKey?.Stamp(options);
+            return session.Send(command, options, cancellationToken);
+        });
 
     /// <summary>
     /// Maps a POST endpoint that binds the request body to <typeparamref name="TEvent"/>, publishes it,
@@ -33,13 +39,18 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
     /// <param name="location">Builds the location to poll, returned in the <c>Location</c> header.</param>
     public static RouteHandlerBuilder MapEvent<TEvent>(this IEndpointRouteBuilder endpoints, string pattern, Func<TEvent, string>? location = null)
         where TEvent : class =>
-        endpoints.MapAccepted(pattern, location, (session, @event, cancellationToken) => session.Publish(@event, new PublishOptions(), cancellationToken));
+        endpoints.MapAccepted(pattern, location, (session, @event, idempotencyKey, cancellationToken) =>
+        {
+            var options = new PublishOptions();
+            idempotencyKey?.Stamp(options);
+            return session.Publish(@event, options, cancellationToken);
+        });
 
     static RouteHandlerBuilder MapAccepted<TMessage>(
         this IEndpointRouteBuilder endpoints,
         string pattern,
         Func<TMessage, string>? location,
-        Func<IMessageSession, TMessage, CancellationToken, Task> dispatch)
+        Func<IMessageSession, TMessage, IdempotencyKey?, CancellationToken, Task> dispatch)
         where TMessage : class
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -47,11 +58,16 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
 
         var builder = endpoints.MapPost(pattern, async Task<Results<Accepted, ProblemHttpResult>> ([FromBody] TMessage message, HttpContext httpContext) =>
         {
+            if (!IdempotencyKey.TryRead(httpContext.Request, out var idempotencyKey))
+            {
+                return IdempotencyKey.Invalid();
+            }
+
             var session = httpContext.RequestServices.GetRequiredService<IMessageSession>();
 
             try
             {
-                await dispatch(session, message, httpContext.RequestAborted).ConfigureAwait(false);
+                await dispatch(session, message, idempotencyKey, httpContext.RequestAborted).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not OperationCanceledException || !httpContext.RequestAborted.IsCancellationRequested)
             {

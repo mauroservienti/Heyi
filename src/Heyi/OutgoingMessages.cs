@@ -6,14 +6,21 @@ using NServiceBus.TransactionalSession;
 sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
 {
     bool active;
+    IdempotencyKey? idempotencyKey;
 
-    internal void Activate() => active = true;
+    internal void Activate(IdempotencyKey? key)
+    {
+        active = true;
+        idempotencyKey = key;
+    }
 
     public Task Send(object message, SendOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
         EnsureActive();
-        return session.Send(message, options ?? new SendOptions(), cancellationToken);
+        var sendOptions = options ?? new SendOptions();
+        idempotencyKey?.Stamp(sendOptions);
+        return session.Send(message, sendOptions, cancellationToken);
     }
 
     public Task SendLocal(object message, SendOptions? options = null, CancellationToken cancellationToken = default)
@@ -22,6 +29,7 @@ sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
         EnsureActive();
         var sendOptions = options ?? new SendOptions();
         sendOptions.RouteToThisEndpoint();
+        idempotencyKey?.Stamp(sendOptions);
         return session.Send(message, sendOptions, cancellationToken);
     }
 
@@ -29,7 +37,9 @@ sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
     {
         ArgumentNullException.ThrowIfNull(message);
         EnsureActive();
-        return session.Publish(message, options ?? new PublishOptions(), cancellationToken);
+        var publishOptions = options ?? new PublishOptions();
+        idempotencyKey?.Stamp(publishOptions);
+        return session.Publish(message, publishOptions, cancellationToken);
     }
 
     void EnsureActive()
