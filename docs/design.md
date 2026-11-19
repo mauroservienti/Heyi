@@ -101,7 +101,10 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 
 An `Idempotency-Key` request header (see the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)) becomes the identity of the outgoing messages, so a retried request produces messages with the same IDs, and receivers can deduplicate them.
 
-- One key, many messages: message IDs are derived deterministically from the key and the message's position in the request, for example `{key}/{index}`.
+- One key, many messages: the n-th message sent while handling the request gets the `{key}/{n}` message ID, counting from `0`. The IDs are deterministic as long as the endpoint sends its messages in the same order, so avoid sending them concurrently.
+- A message ID set explicitly in the send or publish options wins. It still counts as a position, so it doesn't shift the others.
+- The key is a structured field string, so it's quoted (`Idempotency-Key: "8e03978e"`); unquoted keys are accepted too. An empty key, or more than one, is a `400` problem details response, before the session opens or anything is sent.
+- Without the header, message IDs are left to NServiceBus.
 - Applies to both atomic and accept-only endpoints.
 - v1 stamps message IDs only. The transactional session doesn't deduplicate incoming requests, so a retried atomic request still runs the endpoint again; the database must reject the duplicate (for example, with a unique constraint), as described in ["Idempotent, you must be"](https://milestone.topics.it/2026/11/26/idempotency-deep-dive.html).
 - Later: store the key with the first response and replay it, which the IETF draft describes. Out of scope for v1.
