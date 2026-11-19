@@ -29,7 +29,8 @@ NServiceBus comes first, Heyi second. Heyi doesn't configure or host NServiceBus
    ```csharp
    builder.Services.AddHeyi(options =>
        options.OpenSessionOptions(() => new SqlPersistenceOpenSessionOptions()));
-   builder.Services.AddHeyiDbContext<OrdersDbContext>((options, connection) => options.UseSqlServer(connection));
+   builder.Services.AddDbContext<OrdersDbContext>(options => options.UseSqlServer(connectionString));
+   builder.Services.AddHeyiDbContext<OrdersDbContext>();
 
    var app = builder.Build();
 
@@ -106,14 +107,17 @@ An `Idempotency-Key` request header (see the [IETF draft](https://datatracker.ie
 
 ## Data access
 
-The endpoint's data access must share the transactional session's connection and transaction. For EF Core with SQL persistence, Heyi ships a registration helper that does what the [Particular sample](https://docs.particular.net/samples/transactional-session/aspnetcore-webapi/) does by hand:
+The endpoint's data access must share the transactional session's connection and transaction. For EF Core with SQL persistence, Heyi does what the [Particular sample](https://docs.particular.net/samples/transactional-session/aspnetcore-webapi/) does by hand. The context is registered as usual, then Heyi is told about it:
 
 ```csharp
-builder.Services.AddHeyiDbContext<OrdersDbContext>((options, connection) => options.UseSqlServer(connection));
+builder.Services.AddDbContext<OrdersDbContext>(options => options.UseSqlServer(connectionString));
+builder.Services.AddHeyiDbContext<OrdersDbContext>();
 ```
 
-- Inside a transactional endpoint, the context uses the session's `ISqlStorageSession` connection and transaction, and `SaveChangesAsync` runs right before the commit.
-- Outside one, the context gets its own connection, as usual.
+- Inside a transactional endpoint, right after opening the session, Heyi switches the request's context to the session's `ISqlStorageSession` connection and transaction, and registers `SaveChangesAsync` to run right before the commit.
+- Because Heyi attaches the request-scoped instance instead of creating the context itself, it doesn't matter when the context was resolved. A context injected as an endpoint parameter, resolved before the session is opened, still joins it.
+- Outside a transactional endpoint, the context works as registered, with its own connection.
+- With a persistence other than SQL persistence, transactional endpoints fail with a clear message.
 
 Other persistences expose their own storage sessions; v1 covers SQL persistence and EF Core, and the design keeps the seam open for the others.
 
