@@ -1,38 +1,23 @@
 namespace Heyi.Tests;
 
 using NServiceBus;
+using NServiceBus.Testing;
 
-sealed class FakeMessageSession : IMessageSession
+sealed class FakeMessageSession : TestableMessageSession
 {
-    public List<object> Sent { get; } = [];
-    public List<object> Published { get; } = [];
     public Exception? DispatchFailure { get; set; }
 
-    public Task Send(object message, SendOptions sendOptions, CancellationToken cancellationToken = default)
+    public override Task Send(object message, SendOptions sendOptions, CancellationToken cancellationToken = default)
     {
         ThrowIfFailing();
-        Sent.Add(message);
-        return Task.CompletedTask;
+        return base.Send(message, sendOptions, cancellationToken);
     }
 
-    public Task Send<T>(Action<T> messageConstructor, SendOptions sendOptions, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
-
-    public Task Publish(object message, PublishOptions publishOptions, CancellationToken cancellationToken = default)
+    public override Task Publish(object message, PublishOptions publishOptions, CancellationToken cancellationToken = default)
     {
         ThrowIfFailing();
-        Published.Add(message);
-        return Task.CompletedTask;
+        return base.Publish(message, publishOptions, cancellationToken);
     }
-
-    public Task Publish<T>(Action<T> messageConstructor, PublishOptions publishOptions, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
-
-    public Task Subscribe(Type eventType, SubscribeOptions subscribeOptions, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
-
-    public Task Unsubscribe(Type eventType, UnsubscribeOptions unsubscribeOptions, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
 
     void ThrowIfFailing()
     {

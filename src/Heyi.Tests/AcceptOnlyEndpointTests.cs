@@ -42,8 +42,8 @@ public class AcceptOnlyEndpointTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
         Assert.That(response.Headers.Location, Is.Null);
-        Assert.That(messageSession.Sent, Is.EqualTo(new object[] { new PlaceOrder(orderId) }));
-        Assert.That(messageSession.Published, Is.Empty);
+        Assert.That(messageSession.SentMessages.Select(sent => sent.Message), Is.EqualTo(new object[] { new PlaceOrder(orderId) }));
+        Assert.That(messageSession.PublishedMessages, Is.Empty);
     }
 
     [Test]
@@ -55,8 +55,8 @@ public class AcceptOnlyEndpointTests
         using var response = await app.CreateClient().PostAsJsonAsync("/order-requests", new OrderRequested(orderId));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That(messageSession.Published, Is.EqualTo(new object[] { new OrderRequested(orderId) }));
-        Assert.That(messageSession.Sent, Is.Empty);
+        Assert.That(messageSession.PublishedMessages.Select(published => published.Message), Is.EqualTo(new object[] { new OrderRequested(orderId) }));
+        Assert.That(messageSession.SentMessages, Is.Empty);
     }
 
     [Test]
@@ -92,7 +92,7 @@ public class AcceptOnlyEndpointTests
         using var response = await app.CreateClient().PostAsync("/orders", JsonContent.Create<PlaceOrder?>(null));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
-        Assert.That(messageSession.Sent, Is.Empty);
+        Assert.That(messageSession.SentMessages, Is.Empty);
     }
 
     [Test]
@@ -103,7 +103,7 @@ public class AcceptOnlyEndpointTests
         using var response = await app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(Guid.NewGuid()));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That(messageSession.Sent, Has.Count.EqualTo(1));
+        Assert.That(messageSession.SentMessages, Has.Length.EqualTo(1));
     }
 
     [Test]
