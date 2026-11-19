@@ -27,6 +27,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="NServiceBus.TransactionalSession" Version="[4.1.0, 5.0.0)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Heyi.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\..\assets\icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
