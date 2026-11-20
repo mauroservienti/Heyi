@@ -15,8 +15,7 @@ app.MapPost("/orders/{orderId}/cancellations", async (Guid orderId, RequestsDbCo
 
 The endpoint records the cancellation request, the task users can check on, and sends the message that starts the work: both, or neither. It doesn't open, commit, or dispose anything. Heyi does it around the endpoint, on top of the [NServiceBus transactional session](https://docs.particular.net/nservicebus/transactional-session/) and the outbox. Heyi adds the programming model, not the guarantees.
 
-> [!NOTE]
-> Heyi is a work in progress and isn't published on NuGet yet. The three v1 features work today: atomic endpoints with the EF Core integration, accept-only endpoints, and idempotency at the edge. The [design document](https://github.com/mauroservienti/Heyi/blob/main/docs/design.md) describes the planned v1 scope.
+Heyi is available [on NuGet](https://www.nuget.org/packages/Heyi): `dotnet add package Heyi`. The [design document](https://github.com/mauroservienti/Heyi/blob/main/docs/design.md) describes the design decisions and what's next.
 
 ## How it works
 
