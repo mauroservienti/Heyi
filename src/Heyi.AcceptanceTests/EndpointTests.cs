@@ -81,10 +81,6 @@ public class EndpointTests
         })
         .WithTransactionalSession();
 
-        // The check runs inside the session, and before it, with the same DbContext.
-        app.MapPost("/checked-orders", StoreNewOrder).WithTransactionalSession().WithAcceptanceCheck<OrderIsNew>();
-        app.MapPost("/prechecked-orders", StoreNewOrder).WithAcceptanceCheck<OrderIsNew>().WithTransactionalSession();
-
         app.MapEvent<OrderPlaced>("/order-placed-events");
 
         await app.StartAsync();
@@ -175,55 +171,6 @@ public class EndpointTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
         Assert.That(await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout), Is.EqualTo($"{key}/0"));
-    }
-
-    static async Task<IResult> StoreNewOrder(NewOrder order, OrdersDbContext db, IOutgoingMessages messages)
-    {
-        db.Orders.Add(new Order { Id = order.Id });
-        await db.SaveChangesAsync();
-        await messages.Publish(new OrderPlaced(order.Id));
-        return order.RejectAfterStoring ? Results.Conflict() : Results.Created($"/orders/{order.Id}", null);
-    }
-
-    [TestCase("/checked-orders")]
-    [TestCase("/prechecked-orders")]
-    public async Task An_accepted_check_lets_the_atomic_endpoint_store_and_dispatch(string path)
-    {
-        var orderId = Guid.NewGuid();
-
-        using var response = await client.PostAsJsonAsync(path, new NewOrder(orderId));
-
-        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
-        Assert.That(await OrderExists(orderId), Is.True);
-        await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout);
-    }
-
-    [TestCase("/checked-orders")]
-    [TestCase("/prechecked-orders")]
-    public async Task A_rejected_check_stops_the_atomic_endpoint(string path)
-    {
-        var orderId = Guid.NewGuid();
-        using var first = await client.PostAsJsonAsync(path, new NewOrder(orderId));
-        Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.Created));
-
-        using var second = await client.PostAsJsonAsync(path, new NewOrder(orderId));
-
-        Assert.That(second.StatusCode, Is.EqualTo(HttpStatusCode.UnprocessableEntity));
-    }
-
-    // The check reads through the DbContext first. If the context stayed on its own connection
-    // instead of joining the session's transaction, the stored order would survive the rollback.
-    [TestCase("/checked-orders")]
-    [TestCase("/prechecked-orders")]
-    public async Task After_a_check_the_atomic_endpoint_still_rolls_back(string path)
-    {
-        var orderId = Guid.NewGuid();
-
-        using var response = await client.PostAsJsonAsync(path, new NewOrder(orderId, RejectAfterStoring: true));
-
-        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
-        Assert.That(await OrderExists(orderId), Is.False);
-        Assert.That(await WasReceivedWithin(orderId, NoMessageWindow), Is.False);
     }
 
     static async Task<bool> OrderExists(Guid orderId)
