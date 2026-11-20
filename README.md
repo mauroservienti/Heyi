@@ -60,6 +60,8 @@ app.MapCompositionHandlers().WithTransactionalSession();
 
 `MapControllers()` covers every controller; reads run without a session.
 
+ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md) isn't supported: its composition handlers run in an MVC result filter, after the endpoint filter has already committed, so their messages would have no session to go to. Map composition routes with `MapCompositionHandlers()` instead.
+
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.
 
 Web applications are usually send-only endpoints, which requires a [remote processor endpoint](https://docs.particular.net/nservicebus/transactional-session/#remote-processor) with the outbox and the transactional session enabled.
