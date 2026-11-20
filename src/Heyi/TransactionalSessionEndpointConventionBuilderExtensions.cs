@@ -15,6 +15,7 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
     /// Wraps the endpoint in an NServiceBus transactional session: the session is opened before the endpoint runs,
     /// and committed after it returns a success status code and before the response is written.
     /// Exceptions and non-success status codes roll back data and messages.
+    /// Safe methods run without a session, unless <c>OpenSessionsForSafeMethods()</c> is set on the Heyi options.
     /// </summary>
     /// <param name="builder">The endpoint or route group.</param>
     /// <param name="openSessionOptions">Overrides the open session options registered with <c>AddHeyi</c>.</param>
@@ -46,6 +47,7 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
 
             var filter = new TransactionalSessionEndpointFilter(
                 factory,
+                options.SafeMethodsUseSessions,
                 services.GetRequiredService<ILogger<TransactionalSessionEndpointFilter>>());
 
             return invocationContext => filter.InvokeAsync(invocationContext, next);
