@@ -22,7 +22,7 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
     /// <param name="endpoints">The route builder.</param>
     /// <param name="pattern">The route pattern.</param>
     /// <param name="location">Builds the location to poll, returned in the <c>Location</c> header.</param>
-    public static RouteHandlerBuilder MapCommand<TCommand>(
+    public static AcceptOnlyEndpointBuilder<TCommand> MapCommand<TCommand>(
         this IEndpointRouteBuilder endpoints,
         string pattern,
         Func<TCommand, string>? location = null)
@@ -41,7 +41,7 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
     /// <param name="endpoints">The route builder.</param>
     /// <param name="pattern">The route pattern.</param>
     /// <param name="location">Builds the location to poll, returned in the <c>Location</c> header.</param>
-    public static RouteHandlerBuilder MapEvent<TEvent>(
+    public static AcceptOnlyEndpointBuilder<TEvent> MapEvent<TEvent>(
         this IEndpointRouteBuilder endpoints,
         string pattern,
         Func<TEvent, string>? location = null)
@@ -53,7 +53,7 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
             return session.Publish(@event, options, cancellationToken);
         });
 
-    static RouteHandlerBuilder MapAccepted<TMessage>(
+    static AcceptOnlyEndpointBuilder<TMessage> MapAccepted<TMessage>(
         this IEndpointRouteBuilder endpoints,
         string pattern,
         Func<TMessage, string>? location,
@@ -102,6 +102,6 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
             return next;
         });
 
-        return builder;
+        return new AcceptOnlyEndpointBuilder<TMessage>(builder);
     }
 }

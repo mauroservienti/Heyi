@@ -71,27 +71,27 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 - Destinations come from the NServiceBus routing configuration.
 - `location: command => $"/orders/{command.OrderId}"` returns a location to poll.
 - A missing or malformed body is a `400`, and nothing is sent. A failed send is a `500` problem details response.
-- They return the `RouteHandlerBuilder`, so validation filters, authorization, and other conventions are added as usual.
+- Validation filters, authorization, and other endpoint conventions are added as usual.
 
 ### Checking before accepting
 
-Some requests can be turned away before anything is sent, by reading the business's state: a product that's no longer available, an order that has already shipped. An acceptance check runs before the message is dispatched, and either accepts it or rejects it with a response, typically a `4xx` problem details response:
+Some requests shouldn't be accepted at all: malformed data, a card number that fails its checksum, a SKU that doesn't exist. An acceptance check runs before the message is dispatched, and either accepts it or rejects it with a response, typically a `4xx` problem details response:
 
 ```csharp
-class ProductIsAvailable(IProductCatalog catalog) : IAcceptanceCheck<PlaceOrder>
+class SkuExists(IProductCatalog catalog) : IAcceptanceCheck<PlaceOrder>
 {
     public async ValueTask<Acceptance> Check(PlaceOrder command, HttpContext httpContext) =>
-        await catalog.IsAvailable(command.ProductId, httpContext.RequestAborted)
+        await catalog.Exists(command.Sku, httpContext.RequestAborted)
             ? Acceptance.Accept()
-            : Acceptance.Reject(TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "The product is no longer available."));
+            : Acceptance.Reject(TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "The product doesn't exist."));
 }
 
-app.MapCommand<PlaceOrder>("/orders").WithAcceptanceCheck<ProductIsAvailable>();
+app.MapCommand<PlaceOrder>("/orders").WithAcceptanceCheck<SkuExists>();
 ```
 
-Dependencies come in through the constructor, from the request services. Checks run in the order they're added, and the first rejection stops the request. A check for a different message type fails when the endpoints are built.
+Dependencies come in through the constructor, from the request services. Checks run in the order they're added, and the first rejection stops the request. A check is tied to its message type, so adding it to the wrong endpoint doesn't compile.
 
-The check reads, it doesn't decide: the state can change right after it, so the message handler still has the final say. Checks make rejections rare, not impossible. If the check needs to store something, it's no longer a check: use an atomic endpoint.
+Checks are for validating requests, not for business rules. Whether a customer can place this order, or an order can still be cancelled, is the message handler's decision: it runs with retries, and decides on the state at the time the message is handled. Checks are available on accept-only endpoints only; atomic endpoints are code already, and the same split applies there.
 
 ### Retries
 

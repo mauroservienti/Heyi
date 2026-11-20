@@ -177,19 +177,19 @@ public class AcceptOnlyEndpointTests
     }
 
     [Test]
-    public async Task Check_for_another_message_fails_when_endpoints_are_built()
+    public async Task Endpoint_conventions_apply_with_checks()
     {
-        await using var app = await Start(endpoints => endpoints.MapEvent<OrderRequested>("/order-requests").WithAcceptanceCheck<AlreadyShipped>());
+        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders")
+            .WithName("PlaceOrder")
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .WithAcceptanceCheck<AlreadyShipped>());
 
-        Assert.That(app.BuildEndpoints, Throws.InvalidOperationException.With.Message.Contains("doesn't accept any of them"));
-    }
+        var endpoint = app.Endpoints.Single();
+        using var response = await app.CreateClient().PostAsJsonAsync("/orders", new PlaceOrder(Guid.NewGuid()));
 
-    [Test]
-    public async Task Check_that_isnt_an_acceptance_check_fails_when_endpoints_are_built()
-    {
-        await using var app = await Start(endpoints => endpoints.MapCommand<PlaceOrder>("/orders").WithAcceptanceCheck<CheckedMessages>());
-
-        Assert.That(app.BuildEndpoints, Throws.InvalidOperationException.With.Message.Contains("doesn't implement IAcceptanceCheck<TMessage>"));
+        Assert.That(endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName, Is.EqualTo("PlaceOrder"));
+        Assert.That(endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>().Select(produces => produces.StatusCode), Does.Contain(StatusCodes.Status409Conflict));
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
     }
 
     [Test]
