@@ -51,6 +51,12 @@ order.MapPost("/returns", ...);
 
 The open session options can be overridden per endpoint, by passing them to `WithTransactionalSession`.
 
+It works with anything that runs endpoint filters, [ServiceComposer](https://github.com/ServiceComposer/ServiceComposer.AspNetCore) composition handlers included: all the handlers of a request send through the same session, and commit or roll back together.
+
+```csharp
+app.MapCompositionHandlers().WithTransactionalSession();
+```
+
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.
 
 Web applications are usually send-only endpoints, which requires a [remote processor endpoint](https://docs.particular.net/nservicebus/transactional-session/#remote-processor) with the outbox and the transactional session enabled.

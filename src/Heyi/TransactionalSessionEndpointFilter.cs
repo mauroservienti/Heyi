@@ -2,6 +2,7 @@ namespace Heyi;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NServiceBus.TransactionalSession;
@@ -66,6 +67,9 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
     {
         INestedHttpResult nested => StatusCodeOf(nested.Result, httpContext),
         IStatusCodeHttpResult { StatusCode: int statusCode } => statusCode,
+        // MVC-style results, for example the ones ServiceComposer's SetActionResult returns:
+        // they run after the filter, so the response status code doesn't reflect them yet.
+        IStatusCodeActionResult { StatusCode: int statusCode } => statusCode,
         _ => httpContext.Response.StatusCode
     };
 

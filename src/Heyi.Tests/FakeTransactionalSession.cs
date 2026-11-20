@@ -30,7 +30,12 @@ sealed class FakeTransactionalSession : ITransactionalSession
 
     public Task Send(object message, SendOptions sendOptions, CancellationToken cancellationToken = default)
     {
-        Operations.Add((message, "Send", sendOptions));
+        // Like the real session, it can be used concurrently, for example by ServiceComposer's handlers.
+        lock (Operations)
+        {
+            Operations.Add((message, "Send", sendOptions));
+        }
+
         return Task.CompletedTask;
     }
 
@@ -39,7 +44,12 @@ sealed class FakeTransactionalSession : ITransactionalSession
 
     public Task Publish(object message, PublishOptions publishOptions, CancellationToken cancellationToken = default)
     {
-        Operations.Add((message, "Publish", publishOptions));
+        // Like the real session, it can be used concurrently, for example by ServiceComposer's handlers.
+        lock (Operations)
+        {
+            Operations.Add((message, "Publish", publishOptions));
+        }
+
         return Task.CompletedTask;
     }
 
