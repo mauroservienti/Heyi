@@ -39,6 +39,24 @@ public class IdempotencyKeyTests
 
     static string Id(string key, Type messageType, int index) => $"{key}/{IdempotencyKey.TypeTag(messageType)}/{index}";
 
+    static string Id(string key, Type messageType, string destination, int index) =>
+        $"{key}/{IdempotencyKey.TypeTag(messageType)}/{IdempotencyKey.Tag(destination)}/{index}";
+
+    static IdempotencyKey Key(string value)
+    {
+        var request = new DefaultHttpContext().Request;
+        request.Headers[IdempotencyKey.HeaderName] = value;
+        IdempotencyKey.TryRead(request, out var key);
+        return key!;
+    }
+
+    static SendOptions To(string destination)
+    {
+        var options = new SendOptions();
+        options.SetDestination(destination);
+        return options;
+    }
+
     [Test]
     public async Task Atomic_endpoint_messages_get_the_key_and_their_position()
     {
@@ -172,9 +190,7 @@ public class IdempotencyKeyTests
     {
         string?[] StampInOrder(params Type[] types)
         {
-            var request = new DefaultHttpContext().Request;
-            request.Headers[IdempotencyKey.HeaderName] = "\"order-42\"";
-            IdempotencyKey.TryRead(request, out var key);
+            var key = Key("\"order-42\"");
             return types.Select(type =>
             {
                 var options = new SendOptions();
@@ -187,6 +203,51 @@ public class IdempotencyKeyTests
         var placeFirst = StampInOrder(typeof(PlaceOrder), typeof(OrderPlaced));
 
         Assert.That(placedFirst, Is.EquivalentTo(placeFirst));
+    }
+
+    [Test]
+    public void The_same_type_to_different_destinations_is_counted_per_destination()
+    {
+        string?[] StampInOrder(params string[] destinations)
+        {
+            var key = Key("\"order-42\"");
+            return destinations.Select(destination =>
+            {
+                var options = To(destination);
+                key.Stamp(options, typeof(PlaceOrder));
+                return options.GetMessageId();
+            }).ToArray();
+        }
+
+        var salesFirst = StampInOrder("Sales", "Warehouse", "Sales");
+        var warehouseFirst = StampInOrder("Warehouse", "Sales", "Sales");
+
+        Assert.That(salesFirst, Is.EqualTo(new[]
+        {
+            Id("order-42", typeof(PlaceOrder), "Sales", 0),
+            Id("order-42", typeof(PlaceOrder), "Warehouse", 0),
+            Id("order-42", typeof(PlaceOrder), "Sales", 1)
+        }));
+        Assert.That(warehouseFirst, Is.EquivalentTo(salesFirst));
+    }
+
+    [Test]
+    public async Task Sends_with_an_explicit_destination_include_it()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+            endpoints.MapPost("/orders", async (PlaceOrder request, IOutgoingMessages messages) =>
+            {
+                await messages.Send(new PlaceOrder(request.OrderId), To("Sales"));
+                await messages.Send(new PlaceOrder(request.OrderId));
+                return Results.Ok();
+            })
+            .WithTransactionalSession());
+
+        using var response = await Post(app, "/orders", new PlaceOrder(42), "\"order-42\"");
+
+        Assert.That(
+            MessageIds(app.Session.Operations.Select(operation => operation.Options)),
+            Is.EqualTo(new[] { Id("order-42", typeof(PlaceOrder), "Sales", 0), Id("order-42", typeof(PlaceOrder), 0) }));
     }
 
     // Message IDs are a contract with receivers that deduplicate them:
