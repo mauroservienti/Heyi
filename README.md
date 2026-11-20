@@ -104,7 +104,7 @@ Heyi doesn't retry failed sends. [NServiceBus.Extensions.DispatchRetries](https:
 
 ## Idempotency at the edge
 
-Clients retry, proxies retry, users double-click. When a request carries an [`Idempotency-Key`](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) header, Heyi turns it into the identity of the outgoing messages: the n-th message sent while handling the request gets the `{key}/{n}` message ID. A retried request produces messages with the same IDs, and receivers can deduplicate them, for example with the outbox.
+Clients retry, proxies retry, users double-click. When a request carries an [`Idempotency-Key`](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) header, Heyi turns it into the identity of the outgoing messages: the n-th message of a given type sent while handling the request gets the `{key}/{type}/{n}` message ID, where `{type}` is a short hash of the message type's full name. A retried request produces messages with the same IDs, and receivers can deduplicate them, for example with the outbox.
 
 ```http
 POST /orders/1234/cancellations
@@ -112,7 +112,7 @@ Idempotency-Key: "8e03978e-40d5-43e8-bc93-6894a57f9324"
 ```
 
 - Works for atomic and accept-only endpoints.
-- The IDs are deterministic as long as the endpoint sends its messages in the same order, so avoid sending them concurrently.
+- Messages are counted per type, so the IDs stay deterministic when different message types are sent concurrently, as ServiceComposer's composition handlers do. Messages of the same type must still be sent in the same order.
 - A message ID set explicitly in the options wins, and still counts as a position.
 - An empty key, or more than one, is a `400` problem details response, and nothing is sent.
 

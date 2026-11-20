@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
+using NServiceBus;
 using NUnit.Framework;
 using ServiceComposer.AspNetCore;
 
@@ -55,6 +56,22 @@ public class ServiceComposerTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(app.Session.Committed, Is.False);
         Assert.That(app.Session.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Concurrent_handlers_get_deterministic_message_ids()
+    {
+        await using var app = await Start();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/orders/42");
+        request.Headers.Add("Idempotency-Key", "\"order-42\"");
+        using var response = await app.CreateClient().SendAsync(request);
+
+        Assert.That(app.Session.Operations.Select(operation => operation.Options.GetMessageId()), Is.EquivalentTo(new[]
+        {
+            $"order-42/{IdempotencyKey.TypeTag(typeof(SalesCommand))}/0",
+            $"order-42/{IdempotencyKey.TypeTag(typeof(ShippingCommand))}/0"
+        }));
     }
 
     [Test]

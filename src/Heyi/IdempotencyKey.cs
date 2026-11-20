@@ -1,5 +1,8 @@
 namespace Heyi;
 
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using NServiceBus;
@@ -7,15 +10,22 @@ using NServiceBus.Extensibility;
 
 /// <summary>
 /// Turns the <c>Idempotency-Key</c> request header into the identity of the outgoing messages:
-/// the n-th message sent while handling a request gets the <c>{key}/{n}</c> message ID, so a retried
-/// request produces messages with the same IDs, and receivers can deduplicate them.
+/// the n-th message of a given type sent while handling a request gets the <c>{key}/{type}/{n}</c> message ID,
+/// where <c>{type}</c> is a short hash of the message type's full name. A retried request produces messages
+/// with the same IDs, and receivers can deduplicate them.
 /// </summary>
+/// <remarks>
+/// Counting per type keeps the IDs deterministic when different message types are sent concurrently,
+/// for example by ServiceComposer's composition handlers, which run concurrently.
+/// </remarks>
 sealed class IdempotencyKey
 {
     public const string HeaderName = "Idempotency-Key";
 
+    static readonly ConcurrentDictionary<Type, string> typeTags = new();
+
     readonly string value;
-    int lastIndex = -1;
+    readonly ConcurrentDictionary<Type, int> lastIndexes = new();
 
     IdempotencyKey(string value) => this.value = value;
 
@@ -60,16 +70,24 @@ sealed class IdempotencyKey
         detail: "Send a single, non-empty Idempotency-Key header, or none at all.");
 
     /// <summary>
-    /// Assigns the next message ID, unless the message already has one set explicitly.
-    /// The position counts every message, so explicit IDs don't shift the others.
+    /// Assigns the next message ID for the message type, unless the message already has one set explicitly.
+    /// The position counts every message of the type, so explicit IDs don't shift the others.
     /// </summary>
-    public void Stamp(ExtendableOptions options)
+    public void Stamp(ExtendableOptions options, Type messageType)
     {
-        var index = Interlocked.Increment(ref lastIndex);
+        var index = lastIndexes.AddOrUpdate(messageType, 0, (_, lastIndex) => lastIndex + 1);
 
         if (options.GetMessageId() is null)
         {
-            options.SetMessageId($"{value}/{index}");
+            options.SetMessageId($"{value}/{TypeTag(messageType)}/{index}");
         }
     }
+
+    /// <summary>
+    /// The first 8 hexadecimal characters of the SHA-256 hash of the type's full name: stable across
+    /// processes and machines, and short enough to keep message IDs within transport limits.
+    /// </summary>
+    internal static string TypeTag(Type messageType) =>
+        typeTags.GetOrAdd(messageType, type =>
+            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(type.FullName ?? type.Name)))[..8]);
 }

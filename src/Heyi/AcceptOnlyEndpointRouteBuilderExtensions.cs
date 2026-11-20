@@ -30,7 +30,7 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
         endpoints.MapAccepted(pattern, location, (session, command, idempotencyKey, cancellationToken) =>
         {
             var options = new SendOptions();
-            idempotencyKey?.Stamp(options);
+            idempotencyKey?.Stamp(options, command.GetType());
             return session.Send(command, options, cancellationToken);
         });
 
@@ -49,7 +49,7 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
         endpoints.MapAccepted(pattern, location, (session, @event, idempotencyKey, cancellationToken) =>
         {
             var options = new PublishOptions();
-            idempotencyKey?.Stamp(options);
+            idempotencyKey?.Stamp(options, @event.GetType());
             return session.Publish(@event, options, cancellationToken);
         });
 

@@ -37,6 +37,8 @@ public class IdempotencyKeyTests
 
     static IEnumerable<string?> MessageIds(IEnumerable<ExtendableOptions> options) => options.Select(o => o.GetMessageId());
 
+    static string Id(string key, Type messageType, int index) => $"{key}/{IdempotencyKey.TypeTag(messageType)}/{index}";
+
     [Test]
     public async Task Atomic_endpoint_messages_get_the_key_and_their_position()
     {
@@ -47,7 +49,7 @@ public class IdempotencyKeyTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
         Assert.That(
             MessageIds(app.Session.Operations.Select(operation => operation.Options)),
-            Is.EqualTo(new[] { "order-42/0", "order-42/1", "explicit", "order-42/3" }));
+            Is.EqualTo(new[] { Id("order-42", typeof(OrderPlaced), 0), Id("order-42", typeof(OrderPlaced), 1), "explicit", Id("order-42", typeof(OrderPlaced), 3) }));
     }
 
     [Test]
@@ -58,7 +60,7 @@ public class IdempotencyKeyTests
         using var response = await Post(app, "/orders", new PlaceOrder(42), "order-42");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
-        Assert.That(app.Session.Operations[0].Options.GetMessageId(), Is.EqualTo("order-42/0"));
+        Assert.That(app.Session.Operations[0].Options.GetMessageId(), Is.EqualTo(Id("order-42", typeof(OrderPlaced), 0)));
     }
 
     [Test]
@@ -118,7 +120,7 @@ public class IdempotencyKeyTests
         using var response = await Post(app, "/orders", new PlaceOrder(42), "\"order-42\"");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That(messageSession.SentMessages.Single().Options.GetMessageId(), Is.EqualTo("order-42/0"));
+        Assert.That(messageSession.SentMessages.Single().Options.GetMessageId(), Is.EqualTo(Id("order-42", typeof(PlaceOrder), 0)));
     }
 
     [Test]
@@ -130,7 +132,7 @@ public class IdempotencyKeyTests
         using var response = await Post(app, "/order-placed-events", new OrderPlaced(42), "\"order-42\"");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That(messageSession.PublishedMessages.Single().Options.GetMessageId(), Is.EqualTo("order-42/0"));
+        Assert.That(messageSession.PublishedMessages.Single().Options.GetMessageId(), Is.EqualTo(Id("order-42", typeof(OrderPlaced), 0)));
     }
 
     [Test]
@@ -144,4 +146,52 @@ public class IdempotencyKeyTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(messageSession.SentMessages, Is.Empty);
     }
+
+    [Test]
+    public async Task Each_message_type_is_counted_on_its_own()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+            endpoints.MapPost("/orders", async (PlaceOrder request, IOutgoingMessages messages) =>
+            {
+                await messages.Publish(new OrderPlaced(request.OrderId));
+                await messages.SendLocal(new PlaceOrder(request.OrderId));
+                await messages.Publish(new OrderPlaced(request.OrderId));
+                return Results.Ok();
+            })
+            .WithTransactionalSession());
+
+        using var response = await Post(app, "/orders", new PlaceOrder(42), "\"order-42\"");
+
+        Assert.That(
+            MessageIds(app.Session.Operations.Select(operation => operation.Options)),
+            Is.EqualTo(new[] { Id("order-42", typeof(OrderPlaced), 0), Id("order-42", typeof(PlaceOrder), 0), Id("order-42", typeof(OrderPlaced), 1) }));
+    }
+
+    [Test]
+    public void The_order_of_different_message_types_doesnt_change_their_ids()
+    {
+        string?[] StampInOrder(params Type[] types)
+        {
+            var request = new DefaultHttpContext().Request;
+            request.Headers[IdempotencyKey.HeaderName] = "\"order-42\"";
+            IdempotencyKey.TryRead(request, out var key);
+            return types.Select(type =>
+            {
+                var options = new SendOptions();
+                key!.Stamp(options, type);
+                return options.GetMessageId();
+            }).ToArray();
+        }
+
+        var placedFirst = StampInOrder(typeof(OrderPlaced), typeof(PlaceOrder));
+        var placeFirst = StampInOrder(typeof(PlaceOrder), typeof(OrderPlaced));
+
+        Assert.That(placedFirst, Is.EquivalentTo(placeFirst));
+    }
+
+    // Message IDs are a contract with receivers that deduplicate them:
+    // the type tag must not change between versions.
+    [Test]
+    public void The_type_tag_is_the_start_of_the_full_name_hash() =>
+        Assert.That(IdempotencyKey.TypeTag(typeof(OrderPlaced)), Is.EqualTo("0095bc78"));
 }
