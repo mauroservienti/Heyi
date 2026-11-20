@@ -51,13 +51,9 @@ sealed class TestApp : IAsyncDisposable
 
     public HttpClient CreateClient() => app.GetTestClient();
 
-    public void BuildEndpoints()
-    {
-        foreach (var dataSource in ((IEndpointRouteBuilder)app).DataSources)
-        {
-            _ = dataSource.Endpoints;
-        }
-    }
+    public IEnumerable<Microsoft.AspNetCore.Http.Endpoint> Endpoints => ((IEndpointRouteBuilder)app).DataSources.SelectMany(dataSource => dataSource.Endpoints);
+
+    public void BuildEndpoints() => _ = Endpoints.ToList();
 
     public async ValueTask DisposeAsync()
     {

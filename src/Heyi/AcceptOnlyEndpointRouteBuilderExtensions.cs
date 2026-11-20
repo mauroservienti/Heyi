@@ -17,22 +17,17 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
     /// <summary>
     /// Maps a POST endpoint that binds the request body to <typeparamref name="TCommand"/>, sends it,
     /// and returns <c>202 Accepted</c>. The destination comes from the NServiceBus routing configuration.
+    /// Use <c>WithAcceptanceCheck</c> to check the message before it's sent.
     /// </summary>
     /// <param name="endpoints">The route builder.</param>
     /// <param name="pattern">The route pattern.</param>
     /// <param name="location">Builds the location to poll, returned in the <c>Location</c> header.</param>
-    /// <param name="validate">
-    /// Checks the message before it's dispatched, for example against a read model. Return <c>null</c> to accept it,
-    /// or a result, typically a <c>4xx</c> problem details response, to reject it without dispatching anything.
-    /// The check reads state that can change right after it, so the message handler still has the final say.
-    /// </param>
-    public static RouteHandlerBuilder MapCommand<TCommand>(
+    public static AcceptOnlyEndpointBuilder<TCommand> MapCommand<TCommand>(
         this IEndpointRouteBuilder endpoints,
         string pattern,
-        Func<TCommand, string>? location = null,
-        Func<TCommand, HttpContext, ValueTask<IResult?>>? validate = null)
+        Func<TCommand, string>? location = null)
         where TCommand : class =>
-        endpoints.MapAccepted(pattern, location, validate, (session, command, idempotencyKey, cancellationToken) =>
+        endpoints.MapAccepted(pattern, location, (session, command, idempotencyKey, cancellationToken) =>
         {
             var options = new SendOptions();
             idempotencyKey?.Stamp(options);
@@ -41,34 +36,27 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
 
     /// <summary>
     /// Maps a POST endpoint that binds the request body to <typeparamref name="TEvent"/>, publishes it,
-    /// and returns <c>202 Accepted</c>.
+    /// and returns <c>202 Accepted</c>. Use <c>WithAcceptanceCheck</c> to check the message before it's published.
     /// </summary>
     /// <param name="endpoints">The route builder.</param>
     /// <param name="pattern">The route pattern.</param>
     /// <param name="location">Builds the location to poll, returned in the <c>Location</c> header.</param>
-    /// <param name="validate">
-    /// Checks the message before it's dispatched, for example against a read model. Return <c>null</c> to accept it,
-    /// or a result, typically a <c>4xx</c> problem details response, to reject it without dispatching anything.
-    /// The check reads state that can change right after it, so the message handler still has the final say.
-    /// </param>
-    public static RouteHandlerBuilder MapEvent<TEvent>(
+    public static AcceptOnlyEndpointBuilder<TEvent> MapEvent<TEvent>(
         this IEndpointRouteBuilder endpoints,
         string pattern,
-        Func<TEvent, string>? location = null,
-        Func<TEvent, HttpContext, ValueTask<IResult?>>? validate = null)
+        Func<TEvent, string>? location = null)
         where TEvent : class =>
-        endpoints.MapAccepted(pattern, location, validate, (session, @event, idempotencyKey, cancellationToken) =>
+        endpoints.MapAccepted(pattern, location, (session, @event, idempotencyKey, cancellationToken) =>
         {
             var options = new PublishOptions();
             idempotencyKey?.Stamp(options);
             return session.Publish(@event, options, cancellationToken);
         });
 
-    static RouteHandlerBuilder MapAccepted<TMessage>(
+    static AcceptOnlyEndpointBuilder<TMessage> MapAccepted<TMessage>(
         this IEndpointRouteBuilder endpoints,
         string pattern,
         Func<TMessage, string>? location,
-        Func<TMessage, HttpContext, ValueTask<IResult?>>? validate,
         Func<IMessageSession, TMessage, IdempotencyKey?, CancellationToken, Task> dispatch)
         where TMessage : class
     {
@@ -114,14 +102,6 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
             return next;
         });
 
-        if (validate is not null)
-        {
-            // The message is the handler's first argument.
-            builder.AddEndpointFilter(async (context, next) =>
-                await validate(context.GetArgument<TMessage>(0), context.HttpContext).ConfigureAwait(false)
-                ?? await next(context).ConfigureAwait(false));
-        }
-
-        return builder;
+        return new AcceptOnlyEndpointBuilder<TMessage>(builder);
     }
 }
