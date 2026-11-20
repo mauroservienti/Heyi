@@ -122,3 +122,7 @@ Heyi doesn't store responses or deduplicate requests: a retried atomic request r
 ## License
 
 [MIT](LICENSE)
+
+---
+
+Icon [together](https://thenounproject.com/browse/icons/term/together/) by Andika Cahya Fitriani from the Noun Project (CC BY 3.0)
