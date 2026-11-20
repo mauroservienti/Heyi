@@ -250,6 +250,62 @@ public class IdempotencyKeyTests
             Is.EqualTo(new[] { Id("order-42", typeof(PlaceOrder), "Sales", 0), Id("order-42", typeof(PlaceOrder), 0) }));
     }
 
+    class Sales;
+
+    class Warehouse;
+
+    [Test]
+    public void The_same_type_from_different_senders_is_counted_per_sender()
+    {
+        string?[] StampInOrder(params Type[] senders)
+        {
+            var key = Key("\"order-42\"");
+            return senders.Select(sender =>
+            {
+                var options = new PublishOptions();
+                key.Stamp(options, typeof(OrderPlaced), sender);
+                return options.GetMessageId();
+            }).ToArray();
+        }
+
+        var salesFirst = StampInOrder(typeof(Sales), typeof(Warehouse));
+        var warehouseFirst = StampInOrder(typeof(Warehouse), typeof(Sales));
+
+        var type = IdempotencyKey.TypeTag(typeof(OrderPlaced));
+        Assert.That(salesFirst, Is.EqualTo(new[]
+        {
+            $"order-42/{IdempotencyKey.TypeTag(typeof(Sales))}/{type}/0",
+            $"order-42/{IdempotencyKey.TypeTag(typeof(Warehouse))}/{type}/0"
+        }));
+        Assert.That(warehouseFirst, Is.EquivalentTo(salesFirst));
+    }
+
+    [Test]
+    public async Task Sender_specific_messages_are_counted_apart_from_the_shared_ones()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+            endpoints.MapPost("/orders", async (PlaceOrder request, IOutgoingMessages shared, IOutgoingMessages<Sales> sales) =>
+            {
+                await shared.Publish(new OrderPlaced(request.OrderId));
+                await sales.Send(new PlaceOrder(request.OrderId), To("Sales"));
+                await sales.Publish(new OrderPlaced(request.OrderId));
+                return Results.Ok();
+            })
+            .WithTransactionalSession());
+
+        using var response = await Post(app, "/orders", new PlaceOrder(42), "\"order-42\"");
+
+        var sender = IdempotencyKey.TypeTag(typeof(Sales));
+        Assert.That(
+            MessageIds(app.Session.Operations.Select(operation => operation.Options)),
+            Is.EqualTo(new[]
+            {
+                Id("order-42", typeof(OrderPlaced), 0),
+                $"order-42/{sender}/{IdempotencyKey.TypeTag(typeof(PlaceOrder))}/{IdempotencyKey.Tag("Sales")}/0",
+                $"order-42/{sender}/{IdempotencyKey.TypeTag(typeof(OrderPlaced))}/0"
+            }));
+    }
+
     // Message IDs are a contract with receivers that deduplicate them:
     // the type tag must not change between versions.
     [Test]

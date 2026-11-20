@@ -22,6 +22,7 @@ public static class HeyiServiceCollectionExtensions
         services.AddSingleton(options);
         services.AddScoped<OutgoingMessages>();
         services.AddScoped<IOutgoingMessages>(sp => sp.GetRequiredService<OutgoingMessages>());
+        services.AddScoped(typeof(IOutgoingMessages<>), typeof(OutgoingMessages<>));
 
         return services;
     }

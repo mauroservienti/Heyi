@@ -13,7 +13,8 @@ using NServiceBus.Extensibility;
 /// the n-th message of a given type sent while handling a request gets the <c>{key}/{type}/{n}</c> message ID,
 /// where <c>{type}</c> is a short hash of the message type's full name. Sends with an explicit destination get
 /// the <c>{key}/{type}/{destination}/{n}</c> message ID instead, counted per destination. A retried request
-/// produces messages with the same IDs, and receivers can deduplicate them.
+/// produces messages with the same IDs, and receivers can deduplicate them. Messages sent through
+/// <see cref="IOutgoingMessages{TSender}"/> are counted per sender too, and get the <c>{key}/{sender}/{type}/{n}</c> message ID.
 /// </summary>
 /// <remarks>
 /// Counting per type and destination keeps the IDs deterministic when different message types, or the same type
@@ -26,7 +27,7 @@ sealed class IdempotencyKey
     static readonly ConcurrentDictionary<Type, string> typeTags = new();
 
     readonly string value;
-    readonly ConcurrentDictionary<(Type MessageType, string? Destination), int> lastIndexes = new();
+    readonly ConcurrentDictionary<(Type? Sender, Type MessageType, string? Destination), int> lastIndexes = new();
 
     IdempotencyKey(string value) => this.value = value;
 
@@ -71,18 +72,20 @@ sealed class IdempotencyKey
         detail: "Send a single, non-empty Idempotency-Key header, or none at all.");
 
     /// <summary>
-    /// Assigns the next message ID for the message type and explicit destination, if any, unless the message
-    /// already has one set explicitly. The position counts every such message, so explicit IDs don't shift the others.
+    /// Assigns the next message ID for the sender, if any, the message type, and the explicit destination, if any,
+    /// unless the message already has one set explicitly. The position counts every such message,
+    /// so explicit IDs don't shift the others.
     /// </summary>
-    public void Stamp(ExtendableOptions options, Type messageType)
+    public void Stamp(ExtendableOptions options, Type messageType, Type? sender = null)
     {
         var destination = options is SendOptions sendOptions ? sendOptions.GetDestination() : null;
-        var index = lastIndexes.AddOrUpdate((messageType, destination), 0, (_, lastIndex) => lastIndex + 1);
+        var index = lastIndexes.AddOrUpdate((sender, messageType, destination), 0, (_, lastIndex) => lastIndex + 1);
 
         if (options.GetMessageId() is null)
         {
+            var senderSegment = sender is null ? string.Empty : $"/{TypeTag(sender)}";
             var destinationSegment = destination is null ? string.Empty : $"/{Tag(destination)}";
-            options.SetMessageId($"{value}/{TypeTag(messageType)}{destinationSegment}/{index}");
+            options.SetMessageId($"{value}{senderSegment}/{TypeTag(messageType)}{destinationSegment}/{index}");
         }
     }
 
