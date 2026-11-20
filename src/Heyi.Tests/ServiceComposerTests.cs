@@ -27,6 +27,7 @@ public class ServiceComposerTests
                     options.AssemblyScanner.Disable();
                     options.RegisterCompositionHandler<SalesHandler>();
                     options.RegisterCompositionHandler<ShippingHandler>();
+                    options.RegisterCompositionHandler<OrderDetailsHandler>();
                     options.ResponseSerialization.UseOutputFormatters = true;
                 });
             });
@@ -54,6 +55,27 @@ public class ServiceComposerTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(app.Session.Committed, Is.False);
         Assert.That(app.Session.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Reads_run_without_a_session()
+    {
+        await using var app = await Start();
+
+        using var response = await app.CreateClient().GetAsync("/orders/42");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.OpenedWith, Is.Null);
+    }
+
+    class OrderDetailsHandler : ICompositionRequestsHandler
+    {
+        [HttpGet("/orders/{id}")]
+        public Task Handle(HttpRequest request)
+        {
+            request.GetComposedResponseModel().OrderId = (string)request.RouteValues["id"]!;
+            return Task.CompletedTask;
+        }
     }
 
     class SalesHandler(IOutgoingMessages messages) : ICompositionRequestsHandler

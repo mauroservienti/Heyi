@@ -169,6 +169,42 @@ public class TransactionalSessionEndpointFilterTests
     }
 
     [Test]
+    public async Task Safe_methods_run_without_a_session()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+        {
+            var orders = endpoints.MapGroup("/orders").WithTransactionalSession();
+            orders.MapGet("/{orderId}", (int orderId) => new PlaceOrder(orderId));
+            orders.MapPost("/", (PlaceOrder request) => request);
+        });
+        var client = app.CreateClient();
+
+        using var get = await client.GetAsync("/orders/42");
+        Assert.That(get.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.OpenedWith, Is.Null);
+
+        using var post = await client.PostAsJsonAsync("/orders", new PlaceOrder(42));
+        Assert.That(post.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.Committed, Is.True);
+    }
+
+    [Test]
+    public async Task Safe_methods_cant_send_messages()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+            endpoints.MapGet("/orders/{orderId}", async (int orderId, IOutgoingMessages messages) =>
+            {
+                await messages.Publish(new OrderPlaced(orderId));
+                return Results.Ok();
+            })
+            .WithTransactionalSession());
+
+        Assert.That(async () => await app.CreateClient().GetAsync("/orders/42"),
+            Throws.InvalidOperationException.With.Message.Contains("IOutgoingMessages"));
+        Assert.That(app.Session.OpenedWith, Is.Null);
+    }
+
+    [Test]
     public async Task Per_endpoint_open_session_options_override_the_default()
     {
         await using var app = await TestApp.Start(endpoints =>

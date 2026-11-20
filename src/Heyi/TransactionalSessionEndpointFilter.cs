@@ -12,6 +12,14 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
+
+        // Reads don't need atomicity: endpoints for safe methods run without a session,
+        // and IOutgoingMessages throws if they try to send.
+        if (IsSafeMethod(httpContext.Request.Method))
+        {
+            return await next(context).ConfigureAwait(false);
+        }
+
         var session = httpContext.RequestServices.GetRequiredService<ITransactionalSession>();
         var outgoingMessages = httpContext.RequestServices.GetRequiredService<OutgoingMessages>();
 
@@ -72,6 +80,9 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
         IStatusCodeActionResult { StatusCode: int statusCode } => statusCode,
         _ => httpContext.Response.StatusCode
     };
+
+    static bool IsSafeMethod(string method) =>
+        HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method) || HttpMethods.IsTrace(method);
 
     static bool IsSuccessStatusCode(int statusCode) => statusCode is >= 200 and <= 299;
 }

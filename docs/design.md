@@ -73,6 +73,7 @@ Rules:
 - `IOutgoingMessages` is a request-scoped facade over the open session (`Send`, `SendLocal`, `Publish`), asynchronous like the rest of the NServiceBus API, so errors surface where the message is sent. Endpoint code never opens, commits, or disposes anything, and using `IOutgoingMessages` outside a transactional endpoint throws.
 - The status code comes from the returned result, including nested results such as `Results<Created, BadRequest>` and MVC-style results such as `BadRequestObjectResult`, and falls back to the response status code for plain return values. MVC-style results matter for ServiceComposer, whose endpoint filters see the action result a composition handler sets, before it runs: the response status code is still `200` at that point.
 - Route groups work too: `app.MapGroup("/orders/{orderId}").WithTransactionalSession()`.
+- Safe methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`) run without a session: reads don't need atomicity, and a route group or `MapCompositionHandlers()` usually mixes reads and writes. Sending from a read throws, since `IOutgoingMessages` isn't active.
 
 Persistence-specific open options are registered once, with a per-endpoint override:
 
