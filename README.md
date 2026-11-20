@@ -51,11 +51,14 @@ order.MapPost("/returns", ...);
 
 The open session options can be overridden per endpoint, by passing them to `WithTransactionalSession`.
 
-It works with anything that runs endpoint filters, [ServiceComposer](https://github.com/ServiceComposer/ServiceComposer.AspNetCore) composition handlers included: all the handlers of a request send through the same session, and commit or roll back together.
+It works with anything that runs endpoint filters. MVC controllers run them too: inject `IOutgoingMessages` into the controller, and results such as `BadRequest()` or `NotFound()` roll back like any other `4xx`. With [ServiceComposer](https://github.com/ServiceComposer/ServiceComposer.AspNetCore), all the composition handlers of a request send through the same session, and commit or roll back together.
 
 ```csharp
+app.MapControllers().WithTransactionalSession();
 app.MapCompositionHandlers().WithTransactionalSession();
 ```
+
+`MapControllers()` covers every controller; reads run without a session.
 
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.
 
