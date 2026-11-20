@@ -11,6 +11,7 @@
     <Description>Atomic, handler-shaped ASP.NET Core endpoints for NServiceBus: store data and send messages as one operation.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>nservicebus;aspnetcore;minimal-api;transactional-session;outbox</PackageTags>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
@@ -38,6 +39,7 @@
 
   <ItemGroup>
     <None Include="..\..\assets\icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
