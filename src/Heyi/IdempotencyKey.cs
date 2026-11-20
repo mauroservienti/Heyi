@@ -11,12 +11,14 @@ using NServiceBus.Extensibility;
 /// <summary>
 /// Turns the <c>Idempotency-Key</c> request header into the identity of the outgoing messages:
 /// the n-th message of a given type sent while handling a request gets the <c>{key}/{type}/{n}</c> message ID,
-/// where <c>{type}</c> is a short hash of the message type's full name. A retried request produces messages
-/// with the same IDs, and receivers can deduplicate them.
+/// where <c>{type}</c> is a short hash of the message type's full name. Sends with an explicit destination get
+/// the <c>{key}/{type}/{destination}/{n}</c> message ID instead, counted per destination. A retried request
+/// produces messages with the same IDs, and receivers can deduplicate them. Messages sent through
+/// <see cref="IOutgoingMessages{TSender}"/> are counted per sender too, and get the <c>{key}/{sender}/{type}/{n}</c> message ID.
 /// </summary>
 /// <remarks>
-/// Counting per type keeps the IDs deterministic when different message types are sent concurrently,
-/// for example by ServiceComposer's composition handlers, which run concurrently.
+/// Counting per type and destination keeps the IDs deterministic when different message types, or the same type
+/// to different destinations, are sent concurrently, for example by ServiceComposer's composition handlers.
 /// </remarks>
 sealed class IdempotencyKey
 {
@@ -25,7 +27,7 @@ sealed class IdempotencyKey
     static readonly ConcurrentDictionary<Type, string> typeTags = new();
 
     readonly string value;
-    readonly ConcurrentDictionary<Type, int> lastIndexes = new();
+    readonly ConcurrentDictionary<(Type? Sender, Type MessageType, string? Destination), int> lastIndexes = new();
 
     IdempotencyKey(string value) => this.value = value;
 
@@ -70,16 +72,20 @@ sealed class IdempotencyKey
         detail: "Send a single, non-empty Idempotency-Key header, or none at all.");
 
     /// <summary>
-    /// Assigns the next message ID for the message type, unless the message already has one set explicitly.
-    /// The position counts every message of the type, so explicit IDs don't shift the others.
+    /// Assigns the next message ID for the sender, if any, the message type, and the explicit destination, if any,
+    /// unless the message already has one set explicitly. The position counts every such message,
+    /// so explicit IDs don't shift the others.
     /// </summary>
-    public void Stamp(ExtendableOptions options, Type messageType)
+    public void Stamp(ExtendableOptions options, Type messageType, Type? sender = null)
     {
-        var index = lastIndexes.AddOrUpdate(messageType, 0, (_, lastIndex) => lastIndex + 1);
+        var destination = options is SendOptions sendOptions ? sendOptions.GetDestination() : null;
+        var index = lastIndexes.AddOrUpdate((sender, messageType, destination), 0, (_, lastIndex) => lastIndex + 1);
 
         if (options.GetMessageId() is null)
         {
-            options.SetMessageId($"{value}/{TypeTag(messageType)}/{index}");
+            var senderSegment = sender is null ? string.Empty : $"/{TypeTag(sender)}";
+            var destinationSegment = destination is null ? string.Empty : $"/{Tag(destination)}";
+            options.SetMessageId($"{value}{senderSegment}/{TypeTag(messageType)}{destinationSegment}/{index}");
         }
     }
 
@@ -88,6 +94,11 @@ sealed class IdempotencyKey
     /// processes and machines, and short enough to keep message IDs within transport limits.
     /// </summary>
     internal static string TypeTag(Type messageType) =>
-        typeTags.GetOrAdd(messageType, type =>
-            Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(type.FullName ?? type.Name)))[..8]);
+        typeTags.GetOrAdd(messageType, type => Tag(type.FullName ?? type.Name));
+
+    /// <summary>
+    /// The first 8 hexadecimal characters of the SHA-256 hash of <paramref name="value"/>.
+    /// </summary>
+    internal static string Tag(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8];
 }

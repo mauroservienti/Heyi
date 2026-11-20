@@ -17,6 +17,8 @@ public class ServiceComposerTests
 
     public record ShippingCommand(string OrderId);
 
+    public record CartItemAdded(string CartId);
+
     static Task<TestApp> Start() =>
         TestApp.Start(
             endpoints => endpoints.MapCompositionHandlers().WithTransactionalSession(),
@@ -29,6 +31,8 @@ public class ServiceComposerTests
                     options.RegisterCompositionHandler<SalesHandler>();
                     options.RegisterCompositionHandler<ShippingHandler>();
                     options.RegisterCompositionHandler<OrderDetailsHandler>();
+                    options.RegisterCompositionHandler<SalesCartHandler>();
+                    options.RegisterCompositionHandler<WarehouseCartHandler>();
                     options.ResponseSerialization.UseOutputFormatters = true;
                 });
             });
@@ -75,6 +79,23 @@ public class ServiceComposerTests
     }
 
     [Test]
+    public async Task Concurrent_handlers_sending_the_same_type_get_their_own_message_ids()
+    {
+        await using var app = await Start();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/carts/42");
+        request.Headers.Add("Idempotency-Key", "\"cart-42\"");
+        using var response = await app.CreateClient().SendAsync(request);
+
+        var type = IdempotencyKey.TypeTag(typeof(CartItemAdded));
+        Assert.That(app.Session.Operations.Select(operation => operation.Options.GetMessageId()), Is.EquivalentTo(new[]
+        {
+            $"cart-42/{IdempotencyKey.TypeTag(typeof(SalesCartHandler))}/{type}/0",
+            $"cart-42/{IdempotencyKey.TypeTag(typeof(WarehouseCartHandler))}/{type}/0"
+        }));
+    }
+
+    [Test]
     public async Task Reads_run_without_a_session()
     {
         await using var app = await Start();
@@ -115,5 +136,20 @@ public class ServiceComposerTests
         [HttpPost("/orders/{id}")]
         public Task Handle(HttpRequest request) =>
             messages.Send(new ShippingCommand((string)request.RouteValues["id"]!));
+    }
+
+    // Two services lazily sharing a message type: each counts its own messages.
+    class SalesCartHandler(IOutgoingMessages<SalesCartHandler> messages) : ICompositionRequestsHandler
+    {
+        [HttpPost("/carts/{id}")]
+        public Task Handle(HttpRequest request) =>
+            messages.Publish(new CartItemAdded((string)request.RouteValues["id"]!));
+    }
+
+    class WarehouseCartHandler(IOutgoingMessages<WarehouseCartHandler> messages) : ICompositionRequestsHandler
+    {
+        [HttpPost("/carts/{id}")]
+        public Task Handle(HttpRequest request) =>
+            messages.Publish(new CartItemAdded((string)request.RouteValues["id"]!));
     }
 }

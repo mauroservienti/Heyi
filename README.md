@@ -117,7 +117,14 @@ Idempotency-Key: "8e03978e-40d5-43e8-bc93-6894a57f9324"
 ```
 
 - Works for atomic and accept-only endpoints.
-- Messages are counted per type, so the IDs stay deterministic when different message types are sent concurrently, as ServiceComposer's composition handlers do. Messages of the same type must still be sent in the same order.
+- Messages are counted per type, so the IDs stay deterministic when different message types are sent concurrently, as ServiceComposer's composition handlers do.
+- Sends with an explicit destination (`SetDestination`) are counted per destination too, and get the `{key}/{type}/{destination}/{n}` message ID: two handlers sending the same message type to different backends don't swap IDs on retries.
+- Otherwise, messages of the same type must be sent in the same order on every retry. When concurrent code sends or publishes the same message type without a destination, for example two composition handlers publishing the same event, inject `IOutgoingMessages<TSender>` instead: each sender counts its own messages, and gets the `{key}/{sender}/{type}/{n}` message ID.
+
+```csharp
+class SalesCartHandler(IOutgoingMessages<SalesCartHandler> messages) : ICompositionRequestsHandler
+```
+
 - A message ID set explicitly in the options wins, and still counts as a position.
 - An empty key, or more than one, is a `400` problem details response, and nothing is sent.
 
