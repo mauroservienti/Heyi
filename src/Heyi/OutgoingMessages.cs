@@ -19,7 +19,7 @@ sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
         ArgumentNullException.ThrowIfNull(message);
         EnsureActive();
         var sendOptions = options ?? new SendOptions();
-        idempotencyKey?.Stamp(sendOptions);
+        idempotencyKey?.Stamp(sendOptions, message.GetType());
         return session.Send(message, sendOptions, cancellationToken);
     }
 
@@ -29,7 +29,7 @@ sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
         EnsureActive();
         var sendOptions = options ?? new SendOptions();
         sendOptions.RouteToThisEndpoint();
-        idempotencyKey?.Stamp(sendOptions);
+        idempotencyKey?.Stamp(sendOptions, message.GetType());
         return session.Send(message, sendOptions, cancellationToken);
     }
 
@@ -38,7 +38,7 @@ sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
         ArgumentNullException.ThrowIfNull(message);
         EnsureActive();
         var publishOptions = options ?? new PublishOptions();
-        idempotencyKey?.Stamp(publishOptions);
+        idempotencyKey?.Stamp(publishOptions, message.GetType());
         return session.Publish(message, publishOptions, cancellationToken);
     }
 

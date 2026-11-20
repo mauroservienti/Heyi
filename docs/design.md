@@ -105,8 +105,10 @@ app.MapEvent<OrderRequested>("/order-requests"); // Publish, 202 Accepted
 
 An `Idempotency-Key` request header (see the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)) becomes the identity of the outgoing messages, so a retried request produces messages with the same IDs, and receivers can deduplicate them.
 
-- One key, many messages: the n-th message sent while handling the request gets the `{key}/{n}` message ID, counting from `0`. The IDs are deterministic as long as the endpoint sends its messages in the same order, so avoid sending them concurrently.
-- A message ID set explicitly in the send or publish options wins. It still counts as a position, so it doesn't shift the others.
+- One key, many messages: the n-th message of a given type sent while handling the request gets the `{key}/{type}/{n}` message ID, counting from `0`. `{type}` is the first 8 hexadecimal characters of the SHA-256 hash of the message type's full name: stable across processes and versions, and short enough for transports that limit message ID length (Azure Service Bus allows 128 characters).
+- Counting per type keeps the IDs deterministic when different message types are sent concurrently: ServiceComposer runs a request's composition handlers concurrently, and each typically sends its own message types. Messages of the same type must still be sent in the same order. A single counter for all messages would depend on which send lands first.
+- The type tag is part of the contract with receivers that deduplicate: changing it, or renaming a message type, gives retried requests different IDs.
+- A message ID set explicitly in the send or publish options wins. It still counts as a position for its type, so it doesn't shift the others.
 - The key is a structured field string, so it's quoted (`Idempotency-Key: "8e03978e"`); unquoted keys are accepted too. An empty key, or more than one, is a `400` problem details response, before the session opens or anything is sent.
 - Without the header, message IDs are left to NServiceBus.
 - Applies to both atomic and accept-only endpoints.

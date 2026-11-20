@@ -156,7 +156,7 @@ public class EndpointTests
         using var response = await client.SendAsync(atomicRequest);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
-        Assert.That(await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout), Is.EqualTo($"{key}/0"));
+        Assert.That(await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout), Is.EqualTo($"{key}/{OrderPlacedTag}/0"));
     }
 
     [Test]
@@ -170,8 +170,12 @@ public class EndpointTests
         using var response = await client.SendAsync(request);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That(await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout), Is.EqualTo($"{key}/0"));
+        Assert.That(await OrderPlacedHandler.Received(orderId).Task.WaitAsync(MessageTimeout), Is.EqualTo($"{key}/{OrderPlacedTag}/0"));
     }
+
+    // The first 8 hex characters of the SHA-256 hash of the message type's full name.
+    static readonly string OrderPlacedTag = Convert.ToHexStringLower(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(typeof(OrderPlaced).FullName!)))[..8];
 
     static async Task<bool> OrderExists(Guid orderId)
     {
