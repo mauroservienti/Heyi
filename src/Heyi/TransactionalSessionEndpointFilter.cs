@@ -7,15 +7,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NServiceBus.TransactionalSession;
 
-sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSessionOptions, ILogger<TransactionalSessionEndpointFilter> logger)
+sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSessionOptions, bool safeMethodsUseSessions, ILogger<TransactionalSessionEndpointFilter> logger)
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
 
-        // Reads don't need atomicity: endpoints for safe methods run without a session,
+        // Reads don't need atomicity: unless opted in, endpoints for safe methods run without a session,
         // and IOutgoingMessages throws if they try to send.
-        if (IsSafeMethod(httpContext.Request.Method))
+        if (!safeMethodsUseSessions && IsSafeMethod(httpContext.Request.Method))
         {
             return await next(context).ConfigureAwait(false);
         }

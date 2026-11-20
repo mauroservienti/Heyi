@@ -19,7 +19,7 @@ Heyi is available [on NuGet](https://www.nuget.org/packages/Heyi): `dotnet add p
 
 ## How it works
 
-- The session is opened before the endpoint runs. Reads (`GET`, `HEAD`, `OPTIONS`, `TRACE`) run without one, so a route group can mix reads and writes.
+- The session is opened before the endpoint runs. Reads (`GET`, `HEAD`, `OPTIONS`, `TRACE`) run without one, so a route group can mix reads and writes. If reads might change data or send messages, `services.AddHeyi(options => options.OpenSessionsForSafeMethods())` opens a session for them too.
 - Right after opening it, the request's `DbContext` is moved onto the session's connection and transaction, no matter when the context was created. Injecting it as an endpoint parameter is fine.
 - A `2xx` result commits, before the response is written, and the context's changes are saved as part of the commit: no `SaveChanges` call needed.
 - Anything else, exceptions and `4xx`/`5xx` results included, disposes the session, which rolls back data and messages.

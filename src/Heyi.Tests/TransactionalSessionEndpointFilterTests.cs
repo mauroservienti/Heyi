@@ -205,6 +205,28 @@ public class TransactionalSessionEndpointFilterTests
     }
 
     [Test]
+    public async Task Safe_methods_can_opt_in_to_a_session()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+            endpoints.MapGet("/orders/{orderId}", async (int orderId, IOutgoingMessages messages) =>
+            {
+                await messages.Publish(new OrderPlaced(orderId));
+                return Results.Ok();
+            })
+            .WithTransactionalSession(),
+            configureHeyi: options => options
+                .OpenSessionOptions(() => new TestOpenSessionOptions())
+                .OpenSessionsForSafeMethods());
+
+        using var response = await app.CreateClient().GetAsync("/orders/42");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.Committed, Is.True);
+        Assert.That(app.Session.Operations, Has.Count.EqualTo(1));
+        Assert.That(app.Session.Operations[0].Kind, Is.EqualTo("Publish"));
+    }
+
+    [Test]
     public async Task Per_endpoint_open_session_options_override_the_default()
     {
         await using var app = await TestApp.Start(endpoints =>
