@@ -1,5 +1,6 @@
 namespace Heyi;
 
+using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
@@ -69,6 +70,11 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
             return IdempotencyKey.Invalid();
         }
 
+        var startTimestamp = Stopwatch.GetTimestamp();
+        using var activity = Telemetry.SessionStarted(idempotencyKey is not null);
+        var outcome = SessionOutcome.Exception;
+        Exception? failure = null;
+
         try
         {
             await session.Open(openSessionOptions(), httpContext.RequestAborted).ConfigureAwait(false);
@@ -85,6 +91,7 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
             if (!IsSuccessStatusCode(StatusCodeOf(result, httpContext)))
             {
                 // Disposing the session without committing rolls back data and messages.
+                outcome = SessionOutcome.UnsuccessfulResult;
                 return result;
             }
 
@@ -97,18 +104,33 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
             catch (Exception exception) when (exception is not OperationCanceledException || !httpContext.RequestAborted.IsCancellationRequested)
             {
                 logger.LogError(exception, "Failed to commit the transactional session for {Method} {Path}.", httpContext.Request.Method, httpContext.Request.Path);
+                outcome = SessionOutcome.CommitFailed;
+                failure = exception;
 
                 // The endpoint succeeded, but its data and messages didn't: never report a success.
                 return TypedResults.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,
                     title: "The request could not be completed.");
             }
+            catch (OperationCanceledException)
+            {
+                outcome = SessionOutcome.Cancelled;
+                throw;
+            }
 
+            outcome = SessionOutcome.Committed;
             return result;
+        }
+        catch (Exception exception) when (outcome == SessionOutcome.Exception)
+        {
+            // Opening the session or running the endpoint failed. Controller action exceptions arrive wrapped.
+            failure = exception is TransactionalSessionActionFilter.ActionFailedException { InnerException: { } actionException } ? actionException : exception;
+            throw;
         }
         finally
         {
             await session.DisposeAsync().ConfigureAwait(false);
+            Telemetry.SessionEnded(activity, startTimestamp, outcome, failure);
         }
     }
 

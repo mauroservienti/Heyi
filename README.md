@@ -161,6 +161,37 @@ builder.Services.AddHeyi(options => options
 
 Heyi doesn't store responses or deduplicate requests: a retried atomic request runs the endpoint again, so the database must reject the duplicate, for example with a unique constraint.
 
+## Observability
+
+Heyi emits OpenTelemetry traces and metrics, at almost no cost until they're collected. Subscribe to them alongside NServiceBus's own:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddSource("NServiceBus.Core")
+        .AddSource(HeyiTelemetry.ActivitySourceName))
+    .WithMetrics(metrics => metrics
+        .AddMeter("NServiceBus.TransactionalSession")
+        .AddMeter(HeyiTelemetry.MeterName));
+```
+
+NServiceBus traces sends and publishes, and measures commits. Heyi adds what only it knows: why a session rolled back, and what acceptance checks decided.
+
+| Span | When | Tags |
+|---|---|---|
+| `Heyi.TransactionalSession` | From opening the session to committing or rolling it back. The endpoint runs inside it, so its sends and publishes are its children. | `heyi.session.outcome`: `committed`, `rolled_back`, `commit_failed`, or `cancelled`<br>`heyi.session.rollback_reason`: `unsuccessful_result` or `exception`<br>`heyi.idempotency_key.present` |
+| `Heyi.AcceptanceCheck` | Around each acceptance check. | `heyi.acceptance_check.type`<br>`heyi.acceptance_check.outcome`: `accepted`, `rejected`, or `failed` |
+
+| Metric | Unit | Tags |
+|---|---|---|
+| `heyi.session.duration` | `s` | `heyi.session.outcome`, `heyi.session.rollback_reason` |
+| `heyi.acceptance_check.duration` | `s` | `heyi.acceptance_check.type`, `heyi.acceptance_check.outcome` |
+
+- Exceptions and failed commits set the span status to error and record the exception. A rollback because of an unsuccessful result, such as a `409`, isn't an error: the endpoint decided.
+- `cancelled` means the client hung up during the commit. The transactional session still completes it atomically, one way or the other, but Heyi can't tell which.
+- Requests that don't open a session, such as safe methods and opted-out endpoints, aren't traced.
+- The idempotency key itself is never recorded: it's client input.
+
 ## Requirements
 
 - .NET 10

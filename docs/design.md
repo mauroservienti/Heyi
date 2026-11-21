@@ -138,6 +138,14 @@ builder.Services.AddHeyiDbContext<RequestsDbContext>();
 
 Other persistences expose their own storage sessions; v1 covers SQL persistence and EF Core, and the design keeps the seam open for the others.
 
+## Observability
+
+- Heyi emits traces and metrics through one `ActivitySource` and one `Meter`, both named `Heyi`. There's no option to turn them on: collecting them with `AddSource` and `AddMeter` is the opt-in, and without listeners they cost almost nothing.
+- NServiceBus already traces sends and publishes, and the transactional session measures commits and control messages. Heyi doesn't duplicate them: it adds a span around the session, which makes sends and publishes its children, a span per acceptance check, and why a session rolled back, which only Heyi knows.
+- Heyi doesn't tag the request span: it belongs to ASP.NET Core.
+- Names are public API. Telemetry is versioned on its own, starting at `0.1.0`, and the tests pin every name.
+- Tags are low-cardinality: outcomes, reasons, and check types. The idempotency key is client input, so only whether there was one is recorded.
+
 ## Hosting
 
 - Web applications are usually send-only endpoints, which requires a [remote processor endpoint](https://docs.particular.net/nservicebus/transactional-session/#remote-processor) with the outbox and the transactional session enabled. The docs and samples show both setups.
@@ -154,5 +162,5 @@ One package, `Heyi`, including the EF Core and SQL persistence helper. Splitting
 
 ## Testing
 
-- Unit tests for the filter rules: status codes, exceptions, commit failures.
+- Unit tests for the filter rules: status codes, exceptions, commit failures, and the telemetry they emit.
 - Acceptance tests with a real broker and database in containers: data and messages committed together, rolled back together, and a crash between commit and dispatch still dispatching.
