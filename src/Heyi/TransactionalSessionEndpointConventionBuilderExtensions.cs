@@ -1,5 +1,6 @@
 namespace Microsoft.AspNetCore.Builder;
 
+using System.Reflection;
 using Heyi;
 using Microsoft.AspNetCore.Http;
 using NServiceBus.TransactionalSession;
@@ -17,6 +18,8 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
     /// </summary>
     /// <remarks>
     /// To wrap only some controllers or actions, mark them with <see cref="TransactionalSessionAttribute"/> instead.
+    /// To leave some out, mark them, or minimal API handlers, with <see cref="WithoutTransactionalSessionAttribute"/>:
+    /// they're checked when the endpoints are built, so they have no per-request cost.
     /// </remarks>
     /// <param name="builder">The endpoint or route group.</param>
     /// <param name="openSessionOptions">Overrides the open session options registered with <c>AddHeyi</c>.</param>
@@ -27,10 +30,40 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
 
         builder.AddEndpointFilterFactory((context, next) =>
         {
+            if (IsOptedOut(context.MethodInfo))
+            {
+                return next;
+            }
+
             var filter = TransactionalSessionEndpointFilter.Create(context.ApplicationServices, openSessionOptions);
             return invocationContext => filter.InvokeAsync(invocationContext, next);
         });
 
         return builder;
+    }
+
+    // The closest attribute wins: the method's, then its controller's. For controllers, ReflectedType is the controller,
+    // also for actions inherited from a base class.
+    static bool IsOptedOut(MethodInfo method)
+    {
+        foreach (var target in new MemberInfo?[] { method, method.ReflectedType ?? method.DeclaringType })
+        {
+            if (target is null)
+            {
+                continue;
+            }
+
+            if (target.IsDefined(typeof(WithoutTransactionalSessionAttribute), inherit: true))
+            {
+                return true;
+            }
+
+            if (target.IsDefined(typeof(TransactionalSessionAttribute), inherit: true))
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 }

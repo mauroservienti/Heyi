@@ -73,6 +73,8 @@ public class OrdersController(IOutgoingMessages messages) : ControllerBase
 
 On a controller, the attribute applies to all its actions. It's an MVC filter, so it's for controllers only: minimal API endpoints and composition handlers use `WithTransactionalSession()`. A marked action that's also mapped with `WithTransactionalSession()` runs in a single session.
 
+The other way around, `[WithoutTransactionalSession]` opts a controller or action out, for example a webhook in an app mapped with `MapControllers().WithTransactionalSession()`. It works on minimal API handlers in a transactional route group too. The closest attribute wins: `[TransactionalSession]` on an action opts it back in, even if its controller is opted out, and the other way around.
+
 ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md) isn't supported: its composition handlers run in an MVC result filter, after the endpoint filter has already committed, so their messages would have no session to go to. Map composition routes with `MapCompositionHandlers()` instead.
 
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.

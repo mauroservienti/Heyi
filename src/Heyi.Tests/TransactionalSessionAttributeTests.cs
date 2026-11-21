@@ -3,6 +3,7 @@ namespace Heyi.Tests;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
@@ -121,6 +122,42 @@ public class TransactionalSessionAttributeTests
         Assert.That(app.Session.Operations, Has.Count.EqualTo(1));
     }
 
+    // The closest attribute wins.
+    [TestCase(true, "/opted-out-controller/notes", false, TestName = "App configuration, opted-out controller")]
+    [TestCase(true, "/opted-out-controller/cancellations", true, TestName = "App configuration, opted-out controller, marked action")]
+    [TestCase(false, "/marked-controller/notes", false, TestName = "Marked controller, opted-out action")]
+    [TestCase(true, "/marked-controller/notes", false, TestName = "App configuration, marked controller, opted-out action")]
+    [TestCase(true, "/marked-actions/webhook", false, TestName = "App configuration, opted-out action")]
+    public async Task Opting_out(bool withTransactionalSession, string path, bool usesSession)
+    {
+        await using var app = await StartControllers(withTransactionalSession);
+
+        using var response = await app.CreateClient().PostAsJsonAsync(path, new ControllerTests.CancelOrder(42));
+
+        Assert.That(response.IsSuccessStatusCode, Is.True);
+        Assert.That(app.Session.OpenedWith, usesSession ? Is.Not.Null : Is.Null);
+        Assert.That(app.Session.Committed, Is.EqualTo(usesSession));
+    }
+
+    [Test]
+    public async Task Minimal_api_handlers_can_opt_out_of_a_transactional_group()
+    {
+        await using var app = await TestApp.Start(endpoints =>
+        {
+            var orders = endpoints.MapGroup("/orders").WithTransactionalSession();
+            orders.MapPost("/webhook", [WithoutTransactionalSession] () => Results.Ok());
+            orders.MapPost("/cancellations", () => Results.Ok());
+        });
+        var client = app.CreateClient();
+
+        using var webhook = await client.PostAsync("/orders/webhook", null);
+        Assert.That(webhook.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.OpenedWith, Is.Null);
+
+        using var cancellations = await client.PostAsync("/orders/cancellations", null);
+        Assert.That(app.Session.Committed, Is.True);
+    }
+
     [Test]
     public async Task Marked_actions_require_the_transactional_session()
     {
@@ -161,6 +198,10 @@ public class MarkedActionsController(IOutgoingMessages messages) : ControllerBas
 
     [HttpPost("notes")]
     public IActionResult AddNote(TransactionalSessionAttributeTests.AddNote note) => Ok();
+
+    [HttpPost("webhook")]
+    [WithoutTransactionalSession]
+    public IActionResult Webhook() => Ok();
 }
 
 [ApiController]
@@ -169,6 +210,26 @@ public class MarkedActionsController(IOutgoingMessages messages) : ControllerBas
 public class MarkedController(IOutgoingMessages messages) : ControllerBase
 {
     [HttpPost("cancellations")]
+    public async Task<IActionResult> Cancel(ControllerTests.CancelOrder command)
+    {
+        await messages.Send(command);
+        return Accepted();
+    }
+    [HttpPost("notes")]
+    [WithoutTransactionalSession]
+    public IActionResult AddNote() => Ok();
+}
+
+[ApiController]
+[Route("opted-out-controller")]
+[WithoutTransactionalSession]
+public class OptedOutController(IOutgoingMessages messages) : ControllerBase
+{
+    [HttpPost("notes")]
+    public IActionResult AddNote() => Ok();
+
+    [HttpPost("cancellations")]
+    [TransactionalSession]
     public async Task<IActionResult> Cancel(ControllerTests.CancelOrder command)
     {
         await messages.Send(command);

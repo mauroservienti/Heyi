@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 /// It's an MVC filter: it applies to controllers only. Minimal API endpoints and ServiceComposer composition handlers
 /// use <c>WithTransactionalSession()</c>. Marked actions that are also mapped with <c>WithTransactionalSession()</c>
 /// run in a single session. The open session options are the ones registered with <c>AddHeyi</c>.
+/// The closest attribute wins: <see cref="WithoutTransactionalSessionAttribute"/> on an action opts it out of a marked controller.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = true)]
 public sealed class TransactionalSessionAttribute : Attribute, IFilterFactory
@@ -26,10 +27,20 @@ public sealed class TransactionalSessionAttribute : Attribute, IFilterFactory
         new TransactionalSessionActionFilter(TransactionalSessionEndpointFilter.Create(serviceProvider, openSessionOptions: null));
 }
 
-sealed class TransactionalSessionActionFilter(TransactionalSessionEndpointFilter filter) : IAsyncActionFilter
+sealed class TransactionalSessionActionFilter(TransactionalSessionEndpointFilter filter) : IAsyncActionFilter, ITransactionalSessionPolicy
 {
+    public bool UsesSession => true;
+
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
+        // The closest attribute wins: a [TransactionalSession] controller can have [WithoutTransactionalSession] actions,
+        // and an action marked too has its own filter.
+        if (!ReferenceEquals(context.FindEffectivePolicy<ITransactionalSessionPolicy>(), this))
+        {
+            await next().ConfigureAwait(false);
+            return;
+        }
+
         ActionExecutedContext? executed = null;
         object? result;
 
