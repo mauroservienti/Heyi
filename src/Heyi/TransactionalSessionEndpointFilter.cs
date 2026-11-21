@@ -1,8 +1,11 @@
 namespace Heyi;
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -141,8 +144,18 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
         // MVC-style results, for example the ones ServiceComposer's SetActionResult returns:
         // they run after the filter, so the response status code doesn't reflect them yet.
         IStatusCodeActionResult { StatusCode: int statusCode } => statusCode,
+        // An IResult returned by a controller action, which MVC wraps before action filters see it.
+        IActionResult actionResult when WrappedHttpResult(actionResult) is { } httpResult => StatusCodeOf(httpResult, httpContext),
         _ => httpContext.Response.StatusCode
     };
+
+    static readonly ConcurrentDictionary<Type, PropertyInfo?> wrappedHttpResultProperties = new();
+
+    // MVC's wrapper is internal, but exposes the IResult as a public Result property.
+    static IResult? WrappedHttpResult(IActionResult actionResult) =>
+        wrappedHttpResultProperties
+            .GetOrAdd(actionResult.GetType(), static type => type.GetProperty("Result", typeof(IResult)))
+            ?.GetValue(actionResult) as IResult;
 
     static bool IsSafeMethod(string method) =>
         HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method) || HttpMethods.IsTrace(method);

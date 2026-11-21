@@ -51,6 +51,44 @@ public class WithTransactionalSessionAttributeTests
     }
 
     [Test]
+    public async Task Poco_controllers_returning_results_commit_on_success()
+    {
+        await using var app = await StartControllers();
+
+        using var response = await Cancel(app, "/poco/cancellations");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        Assert.That(response.Headers.Location, Is.EqualTo(new Uri("/cancellations/42", UriKind.Relative)));
+        Assert.That(app.Session.Committed, Is.True);
+        Assert.That(app.Session.Operations.Single().Message, Is.EqualTo(new ControllerTests.CancelOrder(42)));
+    }
+
+    [Test]
+    public async Task Poco_controllers_returning_results_roll_back_on_errors()
+    {
+        await using var app = await StartControllers();
+
+        using var response = await Cancel(app, "/poco/rejected-cancellations");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That(app.Session.OpenedWith, Is.Not.Null);
+        Assert.That(app.Session.Committed, Is.False);
+        Assert.That(app.Session.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Results_returned_by_actions_mapped_with_a_session_roll_back_on_errors()
+    {
+        await using var app = await StartControllers(withTransactionalSession: true);
+
+        using var response = await Cancel(app, "/poco/unmarked-rejected-cancellations");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That(app.Session.OpenedWith, Is.Not.Null);
+        Assert.That(app.Session.Committed, Is.False);
+    }
+
+    [Test]
     public async Task Unmarked_actions_run_without_a_session()
     {
         await using var app = await StartControllers();
@@ -265,3 +303,30 @@ public abstract class MarkedControllerBase(IOutgoingMessages messages) : Control
 [ApiController]
 [Route("derived-controller")]
 public class DerivedController(IOutgoingMessages messages) : MarkedControllerBase(messages);
+
+// A POCO controller: no base class, and IResult return values, like a minimal API handler in a class.
+[Controller]
+[Route("poco")]
+public class PocoEndpoint(IOutgoingMessages messages)
+{
+    [HttpPost("cancellations"), WithTransactionalSession]
+    public async Task<IResult> Cancel([FromBody] ControllerTests.CancelOrder command)
+    {
+        await messages.Send(command);
+        return Results.Accepted($"/cancellations/{command.OrderId}");
+    }
+
+    [HttpPost("rejected-cancellations"), WithTransactionalSession]
+    public async Task<IResult> Reject([FromBody] ControllerTests.CancelOrder command)
+    {
+        await messages.Send(command);
+        return Results.Conflict();
+    }
+
+    [HttpPost("unmarked-rejected-cancellations")]
+    public async Task<IResult> RejectUnmarked([FromBody] ControllerTests.CancelOrder command)
+    {
+        await messages.Send(command);
+        return Results.Conflict();
+    }
+}
