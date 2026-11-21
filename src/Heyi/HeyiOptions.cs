@@ -1,5 +1,6 @@
 namespace Heyi;
 
+using Microsoft.AspNetCore.Http;
 using NServiceBus.TransactionalSession;
 
 /// <summary>
@@ -10,6 +11,8 @@ public sealed class HeyiOptions
     internal Func<OpenSessionOptions>? OpenSessionOptionsFactory { get; private set; }
 
     internal bool SafeMethodsUseSessions { get; private set; }
+
+    internal Func<HttpContext, string?>? IdempotencyKeyScope { get; private set; }
 
     /// <summary>
     /// Sets the persistence-specific options used to open the transactional session
@@ -31,6 +34,24 @@ public sealed class HeyiOptions
     public HeyiOptions OpenSessionsForSafeMethods()
     {
         SafeMethodsUseSessions = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Scopes <c>Idempotency-Key</c> values, for example per client: a non-empty scope is hashed and becomes part of
+    /// every message ID derived from the key, as <c>{key}/{scope}/...</c>. Without a scope, two clients sending the same key
+    /// get the same message IDs, and receivers deduplicate one client's messages away.
+    /// </summary>
+    /// <remarks>
+    /// Return <c>null</c> to leave a request unscoped, for example when it's anonymous. The function only runs for requests
+    /// that carry a key. Changing what it returns changes the message IDs, so retries that straddle the change aren't deduplicated.
+    /// Applies to atomic endpoints, and to accept-only endpoints in applications that call <c>AddHeyi</c>.
+    /// </remarks>
+    /// <param name="scope">Returns the scope for a request, for example <c>httpContext => httpContext.User.FindFirst("sub")?.Value</c>.</param>
+    public HeyiOptions ScopeIdempotencyKeys(Func<HttpContext, string?> scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        IdempotencyKeyScope = scope;
         return this;
     }
 }

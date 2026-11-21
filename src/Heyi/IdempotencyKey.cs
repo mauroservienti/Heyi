@@ -15,6 +15,7 @@ using NServiceBus.Extensibility;
 /// the <c>{key}/{type}/{destination}/{n}</c> message ID instead, counted per destination. A retried request
 /// produces messages with the same IDs, and receivers can deduplicate them. Messages sent through
 /// <see cref="IOutgoingMessages{TSender}"/> are counted per sender too, and get the <c>{key}/{sender}/{type}/{n}</c> message ID.
+/// With a scope configured, for example the client's identity, a hash of it follows the key: <c>{key}/{scope}/...</c>.
 /// </summary>
 /// <remarks>
 /// Counting per type and destination keeps the IDs deterministic when different message types, or the same type
@@ -35,7 +36,14 @@ sealed class IdempotencyKey
     /// Reads the key from the request. Returns <c>false</c> when the header is present but invalid:
     /// empty, or sent more than once. A missing header is valid, and yields no key.
     /// </summary>
-    public static bool TryRead(HttpRequest request, out IdempotencyKey? key)
+    public static bool TryRead(HttpRequest request, out IdempotencyKey? key) => TryRead(request, scope: null, out key);
+
+    /// <summary>
+    /// Reads the key from the request, as <see cref="TryRead(HttpRequest, out IdempotencyKey?)"/> does, and scopes it
+    /// with <paramref name="scope"/>: a non-empty scope is hashed and becomes part of every message ID, as <c>{key}/{scope}/...</c>.
+    /// The scope is only evaluated when the request carries a key.
+    /// </summary>
+    public static bool TryRead(HttpRequest request, Func<HttpContext, string?>? scope, out IdempotencyKey? key)
     {
         key = null;
 
@@ -62,7 +70,8 @@ sealed class IdempotencyKey
             return false;
         }
 
-        key = new IdempotencyKey(raw);
+        var scopeValue = scope?.Invoke(request.HttpContext);
+        key = new IdempotencyKey(string.IsNullOrEmpty(scopeValue) ? raw : $"{raw}/{Tag(scopeValue)}");
         return true;
     }
 

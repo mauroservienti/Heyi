@@ -65,7 +65,8 @@ public static class AcceptOnlyEndpointRouteBuilderExtensions
 
         var builder = endpoints.MapPost(pattern, async Task<Results<Accepted, ProblemHttpResult>> ([FromBody] TMessage message, HttpContext httpContext) =>
         {
-            if (!IdempotencyKey.TryRead(httpContext.Request, out var idempotencyKey))
+            var scope = httpContext.RequestServices.GetService<HeyiOptions>()?.IdempotencyKeyScope;
+            if (!IdempotencyKey.TryRead(httpContext.Request, scope, out var idempotencyKey))
             {
                 return IdempotencyKey.Invalid();
             }

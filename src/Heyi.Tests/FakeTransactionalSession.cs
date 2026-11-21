@@ -23,13 +23,16 @@ sealed class FakeTransactionalSession : ITransactionalSession
 
     public Task Open(OpenSessionOptions options, CancellationToken cancellationToken = default)
     {
-        // Like the real session, it can't be opened twice.
-        if (OpenedWith is not null)
+        // Like the real session, it can't be opened twice. Test apps share one fake across requests,
+        // so a disposed session stands for the next request's new one.
+        if (OpenedWith is not null && !Disposed)
         {
             throw new InvalidOperationException("This session is already open.");
         }
 
         OpenedWith = options;
+        Committed = false;
+        Disposed = false;
         StorageSession = StorageSessionFactory?.Invoke();
         return Task.CompletedTask;
     }
