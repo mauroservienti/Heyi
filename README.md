@@ -71,6 +71,25 @@ public class OrdersController(IOutgoingMessages messages) : ControllerBase
 }
 ```
 
+For an endpoint shaped like a message handler, a controller needs no base class. A class with `[Controller]` gets its dependencies through the constructor, MVC discovers and routes it, and its actions can return the same `IResult` values as minimal API endpoints:
+
+```csharp
+[Controller]
+public class PlaceOrderEndpoint(OrdersDbContext db, IOutgoingMessages messages)
+{
+    [HttpPost("orders"), WithTransactionalSession]
+    public async Task<IResult> Handle([FromBody] PlaceOrder request)
+    {
+        var order = Order.From(request);
+        db.Orders.Add(order);
+        await messages.Publish(new OrderPlaced(order.Id));
+        return Results.Created($"/orders/{order.Id}", order);
+    }
+}
+```
+
+Without `[ApiController]`, MVC doesn't bind complex parameters from the body by default, hence `[FromBody]`.
+
 On a controller, the attribute applies to all its actions. It's an MVC filter, so it's for controllers only: minimal API endpoints and composition handlers use `WithTransactionalSession()`. A marked action that's also mapped with `WithTransactionalSession()` runs in a single session.
 
 The other way around, `[WithoutTransactionalSession]` opts a controller or action out, for example a webhook in an app mapped with `MapControllers().WithTransactionalSession()`. It works on minimal API handlers in a transactional route group too:
