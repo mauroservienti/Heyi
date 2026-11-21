@@ -17,7 +17,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 /// The closest attribute wins: <see cref="WithoutTransactionalSessionAttribute"/> on an action opts it out of a marked controller.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = true)]
-public sealed class TransactionalSessionAttribute : Attribute, IFilterFactory
+public sealed class WithTransactionalSessionAttribute : Attribute, IFilterFactory
 {
     /// <inheritdoc />
     public bool IsReusable => true;
@@ -33,7 +33,7 @@ sealed class TransactionalSessionActionFilter(TransactionalSessionEndpointFilter
 
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        // The closest attribute wins: a [TransactionalSession] controller can have [WithoutTransactionalSession] actions,
+        // The closest attribute wins: a [WithTransactionalSession] controller can have [WithoutTransactionalSession] actions,
         // and an action marked too has its own filter.
         if (!ReferenceEquals(context.FindEffectivePolicy<ITransactionalSessionPolicy>(), this))
         {

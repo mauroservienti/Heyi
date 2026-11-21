@@ -17,7 +17,7 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
     /// Safe methods run without a session, unless <c>OpenSessionsForSafeMethods()</c> is set on the Heyi options.
     /// </summary>
     /// <remarks>
-    /// To wrap only some controllers or actions, mark them with <see cref="TransactionalSessionAttribute"/> instead.
+    /// To wrap only some controllers or actions, mark them with <see cref="WithTransactionalSessionAttribute"/> instead.
     /// To leave some out, mark them, or minimal API handlers, with <see cref="WithoutTransactionalSessionAttribute"/>:
     /// they're checked when the endpoints are built, so they have no per-request cost.
     /// </remarks>
@@ -58,7 +58,7 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
                 return true;
             }
 
-            if (target.IsDefined(typeof(TransactionalSessionAttribute), inherit: true))
+            if (target.IsDefined(typeof(WithTransactionalSessionAttribute), inherit: true))
             {
                 return false;
             }

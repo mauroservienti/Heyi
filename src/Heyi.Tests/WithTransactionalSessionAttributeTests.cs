@@ -8,9 +8,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 
-// [TransactionalSession] is an MVC filter: marked controllers and actions are transactional
+// [WithTransactionalSession] is an MVC filter: marked controllers and actions are transactional
 // without any endpoint configuration.
-public class TransactionalSessionAttributeTests
+public class WithTransactionalSessionAttributeTests
 {
     public record AddNote(int OrderId);
 
@@ -25,7 +25,7 @@ public class TransactionalSessionAttributeTests
                 }
             },
             addTransactionalSession: addTransactionalSession,
-            configureServices: services => services.AddControllers().AddApplicationPart(typeof(TransactionalSessionAttributeTests).Assembly));
+            configureServices: services => services.AddControllers().AddApplicationPart(typeof(WithTransactionalSessionAttributeTests).Assembly));
 
     static async Task<HttpResponseMessage> Cancel(TestApp app, string path, string? idempotencyKey = null)
     {
@@ -173,7 +173,7 @@ public class TransactionalSessionAttributeTests
 public class MarkedActionsController(IOutgoingMessages messages) : ControllerBase
 {
     [HttpPost("cancellations")]
-    [TransactionalSession]
+    [WithTransactionalSession]
     public async Task<IActionResult> Cancel(ControllerTests.CancelOrder command)
     {
         await messages.Send(command);
@@ -181,7 +181,7 @@ public class MarkedActionsController(IOutgoingMessages messages) : ControllerBas
     }
 
     [HttpPost("rejected")]
-    [TransactionalSession]
+    [WithTransactionalSession]
     public async Task<IActionResult> Rejected(ControllerTests.CancelOrder command)
     {
         await messages.Send(command);
@@ -189,7 +189,7 @@ public class MarkedActionsController(IOutgoingMessages messages) : ControllerBas
     }
 
     [HttpPost("failing")]
-    [TransactionalSession]
+    [WithTransactionalSession]
     public async Task<IActionResult> Failing(ControllerTests.CancelOrder command)
     {
         await messages.Send(command);
@@ -197,7 +197,7 @@ public class MarkedActionsController(IOutgoingMessages messages) : ControllerBas
     }
 
     [HttpPost("notes")]
-    public IActionResult AddNote(TransactionalSessionAttributeTests.AddNote note) => Ok();
+    public IActionResult AddNote(WithTransactionalSessionAttributeTests.AddNote note) => Ok();
 
     [HttpPost("webhook")]
     [WithoutTransactionalSession]
@@ -206,7 +206,7 @@ public class MarkedActionsController(IOutgoingMessages messages) : ControllerBas
 
 [ApiController]
 [Route("marked-controller")]
-[TransactionalSession]
+[WithTransactionalSession]
 public class MarkedController(IOutgoingMessages messages) : ControllerBase
 {
     [HttpPost("cancellations")]
@@ -229,7 +229,7 @@ public class OptedOutController(IOutgoingMessages messages) : ControllerBase
     public IActionResult AddNote() => Ok();
 
     [HttpPost("cancellations")]
-    [TransactionalSession]
+    [WithTransactionalSession]
     public async Task<IActionResult> Cancel(ControllerTests.CancelOrder command)
     {
         await messages.Send(command);
@@ -237,7 +237,7 @@ public class OptedOutController(IOutgoingMessages messages) : ControllerBase
     }
 }
 
-[TransactionalSession]
+[WithTransactionalSession]
 public abstract class MarkedControllerBase(IOutgoingMessages messages) : ControllerBase
 {
     [HttpPost("cancellations")]

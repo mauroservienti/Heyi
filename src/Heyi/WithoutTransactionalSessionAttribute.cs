@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 /// for example a controller mapped with <c>MapControllers().WithTransactionalSession()</c>.
 /// </summary>
 /// <remarks>
-/// The closest attribute wins: <see cref="TransactionalSessionAttribute"/> on an action opts it back in, even if
+/// The closest attribute wins: <see cref="WithTransactionalSessionAttribute"/> on an action opts it back in, even if
 /// its controller is opted out, and the other way around. ServiceComposer composition handlers can't be opted out:
 /// the endpoint filter sees the composition pipeline, not the handlers.
 /// </remarks>

@@ -54,7 +54,7 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
 
         var outgoingMessages = httpContext.RequestServices.GetRequiredService<OutgoingMessages>();
 
-        // Already in a session, for example a [TransactionalSession] controller mapped with WithTransactionalSession():
+        // Already in a session, for example a [WithTransactionalSession] controller mapped with WithTransactionalSession():
         // the outer one owns it.
         if (outgoingMessages.IsActive)
         {
