@@ -1,13 +1,82 @@
 namespace Heyi;
 
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+
 /// <summary>
-/// Marks a controller, a controller action, or a minimal API handler as transactional, for endpoints
-/// mapped with <c>WithTransactionalSessionAttributes()</c>: marked endpoints are wrapped in a transactional session,
-/// the others run without one. On a controller, it applies to all its actions, including inherited ones.
+/// Wraps a controller action, or all the actions of a controller, in an NServiceBus transactional session,
+/// with the same rules as <c>WithTransactionalSession()</c>, and without any endpoint configuration.
+/// Use it to choose which controllers or actions are transactional; <c>MapControllers().WithTransactionalSession()</c>
+/// wraps them all.
 /// </summary>
 /// <remarks>
-/// ServiceComposer composition handlers can't be marked: the endpoint filter sees the composition pipeline,
-/// not the handlers. Use <c>MapCompositionHandlers().WithTransactionalSession()</c> instead.
+/// It's an MVC filter: it applies to controllers only. Minimal API endpoints and ServiceComposer composition handlers
+/// use <c>WithTransactionalSession()</c>. Marked actions that are also mapped with <c>WithTransactionalSession()</c>
+/// run in a single session. The open session options are the ones registered with <c>AddHeyi</c>.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = true)]
-public sealed class TransactionalSessionAttribute : Attribute;
+public sealed class TransactionalSessionAttribute : Attribute, IFilterFactory
+{
+    /// <inheritdoc />
+    public bool IsReusable => true;
+
+    /// <inheritdoc />
+    public IFilterMetadata CreateInstance(IServiceProvider serviceProvider) =>
+        new TransactionalSessionActionFilter(TransactionalSessionEndpointFilter.Create(serviceProvider, openSessionOptions: null));
+}
+
+sealed class TransactionalSessionActionFilter(TransactionalSessionEndpointFilter filter) : IAsyncActionFilter
+{
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        ActionExecutedContext? executed = null;
+        object? result;
+
+        try
+        {
+            result = await filter.Run(context.HttpContext, async () =>
+            {
+                executed = await next().ConfigureAwait(false);
+
+                // MVC reports action exceptions on the context instead of throwing them: rethrow so the session rolls back.
+                if (executed.Exception is { } exception && !executed.ExceptionHandled)
+                {
+                    throw new ActionFailedException(exception);
+                }
+
+                return executed.Result;
+            }).ConfigureAwait(false);
+        }
+        catch (ActionFailedException)
+        {
+            // Rolled back. The exception is still on the executed context, for MVC to handle as usual.
+            return;
+        }
+
+        if (executed is null)
+        {
+            // The action didn't run, for example because the Idempotency-Key is invalid.
+            context.Result = AsActionResult(result);
+        }
+        else if (!ReferenceEquals(result, executed.Result))
+        {
+            // The commit failed: the action's result is replaced.
+            executed.Result = AsActionResult(result);
+        }
+    }
+
+    static IActionResult? AsActionResult(object? result) => result switch
+    {
+        IActionResult actionResult => actionResult,
+        IResult httpResult => new HttpResultActionResult(httpResult),
+        _ => null
+    };
+
+    sealed class HttpResultActionResult(IResult result) : IActionResult
+    {
+        public Task ExecuteResultAsync(ActionContext context) => result.ExecuteAsync(context.HttpContext);
+    }
+
+    sealed class ActionFailedException(Exception inner) : Exception(inner.Message, inner);
+}

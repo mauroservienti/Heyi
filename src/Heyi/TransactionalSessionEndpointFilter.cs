@@ -9,19 +9,59 @@ using NServiceBus.TransactionalSession;
 
 sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSessionOptions, bool safeMethodsUseSessions, ILogger<TransactionalSessionEndpointFilter> logger)
 {
-    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    /// <summary>
+    /// Creates the filter, checking that Heyi and the transactional session are registered.
+    /// </summary>
+    public static TransactionalSessionEndpointFilter Create(IServiceProvider services, Func<OpenSessionOptions>? openSessionOptions)
     {
-        var httpContext = context.HttpContext;
+        var options = services.GetService<HeyiOptions>()
+            ?? throw new InvalidOperationException(
+                "Heyi isn't registered. Call services.AddHeyi() after configuring the NServiceBus endpoint.");
 
+        var isService = services.GetRequiredService<IServiceProviderIsService>();
+        if (!isService.IsService(typeof(ITransactionalSession)))
+        {
+            throw new InvalidOperationException(
+                "No ITransactionalSession is registered. Enable the transactional session on the NServiceBus persistence " +
+                "(persistence.EnableTransactionalSession()), enable the outbox, and register the endpoint with AddNServiceBusEndpoint before mapping transactional endpoints.");
+        }
+
+        var factory = openSessionOptions ?? options.OpenSessionOptionsFactory
+            ?? throw new InvalidOperationException(
+                "No open session options are configured. Use services.AddHeyi(options => options.OpenSessionOptions(() => new ...)) " +
+                "or pass them to WithTransactionalSession(() => new ...).");
+
+        return new TransactionalSessionEndpointFilter(
+            factory,
+            options.SafeMethodsUseSessions,
+            services.GetRequiredService<ILogger<TransactionalSessionEndpointFilter>>());
+    }
+
+    public ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
+        Run(context.HttpContext, () => next(context));
+
+    /// <summary>
+    /// Runs <paramref name="next"/> in a transactional session, and returns its result, or the response to send instead.
+    /// </summary>
+    public async ValueTask<object?> Run(HttpContext httpContext, Func<ValueTask<object?>> next)
+    {
         // Reads don't need atomicity: unless opted in, endpoints for safe methods run without a session,
         // and IOutgoingMessages throws if they try to send.
         if (!safeMethodsUseSessions && IsSafeMethod(httpContext.Request.Method))
         {
-            return await next(context).ConfigureAwait(false);
+            return await next().ConfigureAwait(false);
+        }
+
+        var outgoingMessages = httpContext.RequestServices.GetRequiredService<OutgoingMessages>();
+
+        // Already in a session, for example a [TransactionalSession] controller mapped with WithTransactionalSession():
+        // the outer one owns it.
+        if (outgoingMessages.IsActive)
+        {
+            return await next().ConfigureAwait(false);
         }
 
         var session = httpContext.RequestServices.GetRequiredService<ITransactionalSession>();
-        var outgoingMessages = httpContext.RequestServices.GetRequiredService<OutgoingMessages>();
 
         if (!IdempotencyKey.TryRead(httpContext.Request, out var idempotencyKey))
         {
@@ -39,7 +79,7 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
 
             outgoingMessages.Activate(idempotencyKey);
 
-            var result = await next(context).ConfigureAwait(false);
+            var result = await next().ConfigureAwait(false);
 
             if (!IsSuccessStatusCode(StatusCodeOf(result, httpContext)))
             {

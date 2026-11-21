@@ -23,6 +23,12 @@ sealed class FakeTransactionalSession : ITransactionalSession
 
     public Task Open(OpenSessionOptions options, CancellationToken cancellationToken = default)
     {
+        // Like the real session, it can't be opened twice.
+        if (OpenedWith is not null)
+        {
+            throw new InvalidOperationException("This session is already open.");
+        }
+
         OpenedWith = options;
         StorageSession = StorageSessionFactory?.Invoke();
         return Task.CompletedTask;

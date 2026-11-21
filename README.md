@@ -58,10 +58,10 @@ app.MapControllers().WithTransactionalSession();
 app.MapCompositionHandlers().WithTransactionalSession();
 ```
 
-`MapControllers()` covers every controller; reads run without a session. To choose which controllers or actions are transactional, mark them with `[TransactionalSession]` and map them with `WithTransactionalSessionAttributes()`: the others run without a session.
+`MapControllers()` covers every controller; reads run without a session. To choose which controllers or actions are transactional instead, mark them with `[TransactionalSession]`, and leave `MapControllers()` as it is: the others run without a session.
 
 ```csharp
-app.MapControllers().WithTransactionalSessionAttributes();
+app.MapControllers();
 
 public class OrdersController(IOutgoingMessages messages) : ControllerBase
 {
@@ -71,7 +71,7 @@ public class OrdersController(IOutgoingMessages messages) : ControllerBase
 }
 ```
 
-On a controller, the attribute applies to all its actions. It works on minimal API handlers in a route group too, but not on composition handlers: the filter sees ServiceComposer's composition pipeline, not the handlers.
+On a controller, the attribute applies to all its actions. It's an MVC filter, so it's for controllers only: minimal API endpoints and composition handlers use `WithTransactionalSession()`. A marked action that's also mapped with `WithTransactionalSession()` runs in a single session.
 
 ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md) isn't supported: its composition handlers run in an MVC result filter, after the endpoint filter has already committed, so their messages would have no session to go to. Map composition routes with `MapCompositionHandlers()` instead.
 
