@@ -158,7 +158,8 @@ One package, `Heyi`, including the EF Core and SQL persistence helper. Splitting
 ## Later
 
 - Returning messages as values instead of injecting `IOutgoingMessages`: #4
-- Class-based endpoints with attributes: #5
+
+Class-based endpoints (#5) aren't planned: a POCO controller with `[Controller]` and `[WithTransactionalSession]` already has that shape, and MVC already discovers and routes it.
 
 ## Testing
 
