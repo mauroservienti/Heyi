@@ -8,6 +8,8 @@ sealed class OutgoingMessages(ITransactionalSession session) : IOutgoingMessages
     bool active;
     IdempotencyKey? idempotencyKey;
 
+    internal bool IsActive => active;
+
     internal void Activate(IdempotencyKey? key)
     {
         active = true;
