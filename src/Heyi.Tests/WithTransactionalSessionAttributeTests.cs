@@ -98,6 +98,20 @@ public class WithTransactionalSessionAttributeTests
     }
 
     [Test]
+    public async Task Traces_record_the_action_exception()
+    {
+        using var recorder = new TelemetryRecorder();
+        await using var app = await StartControllers();
+
+        Assert.That(async () => await Cancel(app, "/marked-actions/failing"), Throws.InvalidOperationException);
+
+        var span = recorder.Single("Heyi.TransactionalSession");
+        Assert.That(span.GetTagItem("heyi.session.rollback_reason"), Is.EqualTo("exception"));
+        Assert.That(span.StatusDescription, Is.EqualTo("The warehouse is on fire."));
+        Assert.That(span.Events.Single().Tags, Does.Contain(new KeyValuePair<string, object?>("exception.type", typeof(InvalidOperationException).FullName)));
+    }
+
+    [Test]
     public async Task An_invalid_idempotency_key_is_rejected_before_the_action_runs()
     {
         await using var app = await StartControllers();

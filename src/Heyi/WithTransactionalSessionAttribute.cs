@@ -89,5 +89,5 @@ sealed class TransactionalSessionActionFilter(TransactionalSessionEndpointFilter
         public Task ExecuteResultAsync(ActionContext context) => result.ExecuteAsync(context.HttpContext);
     }
 
-    sealed class ActionFailedException(Exception inner) : Exception(inner.Message, inner);
+    internal sealed class ActionFailedException(Exception inner) : Exception(inner.Message, inner);
 }

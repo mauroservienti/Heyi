@@ -1,5 +1,6 @@
 namespace Heyi;
 
+using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -11,8 +12,32 @@ sealed class AcceptanceCheckEndpointFilter<TCheck, TMessage> : IEndpointFilter
     {
         var check = ActivatorUtilities.GetServiceOrCreateInstance<TCheck>(context.HttpContext.RequestServices);
 
-        // The message is the accept-only handler's first argument.
-        var acceptance = await check.Check(context.GetArgument<TMessage>(0), context.HttpContext).ConfigureAwait(false);
+        Acceptance acceptance;
+
+        // The span covers the check only, not the checks after it or the dispatch.
+        var startTimestamp = Stopwatch.GetTimestamp();
+        using (var activity = Telemetry.AcceptanceCheckStarted(typeof(TCheck)))
+        {
+            try
+            {
+                // The message is the accept-only handler's first argument.
+                acceptance = await check.Check(context.GetArgument<TMessage>(0), context.HttpContext).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                Telemetry.AcceptanceCheckFailed(activity, startTimestamp, typeof(TCheck), exception);
+                throw;
+            }
+
+            if (acceptance.IsAccepted)
+            {
+                Telemetry.AcceptanceCheckAccepted(activity, startTimestamp, typeof(TCheck));
+            }
+            else
+            {
+                Telemetry.AcceptanceCheckRejected(activity, startTimestamp, typeof(TCheck));
+            }
+        }
 
         return acceptance.IsAccepted
             ? await next(context).ConfigureAwait(false)
