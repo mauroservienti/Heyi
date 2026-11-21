@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NServiceBus.TransactionalSession;
 
-sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSessionOptions, bool safeMethodsUseSessions, ILogger<TransactionalSessionEndpointFilter> logger)
+sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSessionOptions, bool safeMethodsUseSessions, Func<HttpContext, string?>? idempotencyKeyScope, ILogger<TransactionalSessionEndpointFilter> logger)
 {
     /// <summary>
     /// Creates the filter, checking that Heyi and the transactional session are registered.
@@ -34,6 +34,7 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
         return new TransactionalSessionEndpointFilter(
             factory,
             options.SafeMethodsUseSessions,
+            options.IdempotencyKeyScope,
             services.GetRequiredService<ILogger<TransactionalSessionEndpointFilter>>());
     }
 
@@ -63,7 +64,7 @@ sealed class TransactionalSessionEndpointFilter(Func<OpenSessionOptions> openSes
 
         var session = httpContext.RequestServices.GetRequiredService<ITransactionalSession>();
 
-        if (!IdempotencyKey.TryRead(httpContext.Request, out var idempotencyKey))
+        if (!IdempotencyKey.TryRead(httpContext.Request, idempotencyKeyScope, out var idempotencyKey))
         {
             return IdempotencyKey.Invalid();
         }

@@ -306,6 +306,87 @@ public class IdempotencyKeyTests
             }));
     }
 
+    static void ScopeByClient(HeyiOptions options) => options
+        .OpenSessionOptions(() => new TestOpenSessionOptions())
+        .ScopeIdempotencyKeys(httpContext => httpContext.Request.Headers["X-Client"].FirstOrDefault());
+
+    static async Task<string?> FirstMessageId(TestApp app, string key, string? client)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/orders") { Content = JsonContent.Create(new PlaceOrder(42)) };
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", key);
+        if (client is not null)
+        {
+            request.Headers.Add("X-Client", client);
+        }
+
+        var before = app.Session.Operations.Count;
+        using var response = await app.CreateClient().SendAsync(request);
+        return app.Session.Operations[before].Options.GetMessageId();
+    }
+
+    [Test]
+    public async Task Scoped_keys_include_the_scope_hash()
+    {
+        await using var app = await TestApp.Start(
+            endpoints => endpoints.MapPost("/orders", async (PlaceOrder request, IOutgoingMessages messages) =>
+            {
+                await messages.Publish(new OrderPlaced(request.OrderId));
+                return Results.Ok();
+            })
+            .WithTransactionalSession(),
+            configureHeyi: ScopeByClient);
+
+        var alice = await FirstMessageId(app, "\"order-42\"", "alice");
+        var aliceAgain = await FirstMessageId(app, "\"order-42\"", "alice");
+        var bob = await FirstMessageId(app, "\"order-42\"", "bob");
+        var anonymous = await FirstMessageId(app, "\"order-42\"", null);
+
+        Assert.That(alice, Is.EqualTo(Id($"order-42/{IdempotencyKey.Tag("alice")}", typeof(OrderPlaced), 0)));
+        Assert.That(aliceAgain, Is.EqualTo(alice));
+        Assert.That(bob, Is.Not.EqualTo(alice));
+        Assert.That(anonymous, Is.EqualTo(Id("order-42", typeof(OrderPlaced), 0)));
+    }
+
+    [Test]
+    public async Task The_scope_isnt_evaluated_without_a_key()
+    {
+        var evaluated = false;
+        await using var app = await TestApp.Start(
+            endpoints => endpoints.MapPost("/orders", () => Results.Ok()).WithTransactionalSession(),
+            configureHeyi: options => options
+                .OpenSessionOptions(() => new TestOpenSessionOptions())
+                .ScopeIdempotencyKeys(_ =>
+                {
+                    evaluated = true;
+                    return "alice";
+                }));
+
+        using var response = await Post(app, "/orders", new PlaceOrder(42));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(evaluated, Is.False);
+    }
+
+    [Test]
+    public async Task Accept_only_endpoints_use_the_scope()
+    {
+        var messageSession = new FakeMessageSession();
+        await using var app = await TestApp.Start(
+            endpoints => endpoints.MapCommand<PlaceOrder>("/orders"),
+            configureHeyi: ScopeByClient,
+            addTransactionalSession: false,
+            configureServices: services => services.AddSingleton<IMessageSession>(messageSession));
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/orders") { Content = JsonContent.Create(new PlaceOrder(42)) };
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", "\"order-42\"");
+        request.Headers.Add("X-Client", "alice");
+        using var response = await app.CreateClient().SendAsync(request);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        Assert.That(messageSession.SentMessages.Single().Options.GetMessageId(),
+            Is.EqualTo(Id($"order-42/{IdempotencyKey.Tag("alice")}", typeof(PlaceOrder), 0)));
+    }
+
     // Message IDs are a contract with receivers that deduplicate them:
     // the type tag must not change between versions.
     [Test]

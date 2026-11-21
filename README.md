@@ -148,6 +148,15 @@ class SalesCartHandler(IOutgoingMessages<SalesCartHandler> messages) : IComposit
 ```
 
 - A message ID set explicitly in the options wins, and still counts as a position.
+- The key is client input, and two clients sending the same key would get the same message IDs: receivers would deduplicate one client's messages away. To scope keys per client, configure a scope, which is hashed and follows the key in every message ID (`{key}/{scope}/...`):
+
+```csharp
+builder.Services.AddHeyi(options => options
+    .OpenSessionOptions(() => new SqlPersistenceOpenSessionOptions())
+    .ScopeIdempotencyKeys(httpContext => httpContext.User.FindFirst("sub")?.Value));
+```
+
+  A `null` scope, for example for anonymous requests, leaves the key unscoped.
 - An empty key, or more than one, is a `400` problem details response, and nothing is sent.
 
 Heyi doesn't store responses or deduplicate requests: a retried atomic request runs the endpoint again, so the database must reject the duplicate, for example with a unique constraint.
