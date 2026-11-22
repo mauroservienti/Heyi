@@ -178,6 +178,49 @@ public class ServiceComposerTests
         Assert.That(exception!.Message, Does.Contain("OptedOutWebhookHandler").And.Contain("(WebhookHandler)"));
     }
 
+    [Test]
+    public async Task A_view_model_factory_of_an_opted_out_route_does_not_count()
+    {
+        await using var app = await StartWith(options =>
+        {
+            options.RegisterCompositionHandler<OptedOutWebhookHandler>();
+            options.RegisterCompositionHandler<WebhookViewModelFactory>();
+        });
+
+        using var response = await app.CreateClient().PostAsync("/webhooks/42", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.OpenedWith, Is.Null);
+    }
+
+    [Test]
+    public async Task A_contract_less_handler_opts_out_on_its_class()
+    {
+        await using var app = await StartWith(options =>
+        {
+            options.RegisterCompositionHandler<OptedOutContractlessWebhookHandler>();
+            options.RegisterCompositionHandler<Generated.ServiceComposerTests_OptedOutContractlessWebhookHandler_Post_string_id>();
+        });
+
+        using var response = await app.CreateClient().PostAsync("/contract-less-webhooks/42", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.OpenedWith, Is.Null);
+    }
+
+    class WebhookViewModelFactory : IEndpointScopedViewModelFactory
+    {
+        [HttpPost("/webhooks/{id}")]
+        public object CreateViewModel(HttpContext httpContext, ICompositionContext compositionContext) => new { };
+    }
+
+    [CompositionHandler, WithoutTransactionalSession]
+    public class OptedOutContractlessWebhookHandler
+    {
+        [HttpPost("/contract-less-webhooks/{id}")]
+        public Task Post(string id) => Task.CompletedTask;
+    }
+
     class OptedOutWebhookHandler : ICompositionRequestsHandler
     {
         [HttpPost("/webhooks/{id}"), WithoutTransactionalSession]

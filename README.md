@@ -101,7 +101,7 @@ order.MapPost("/webhook", [WithoutTransactionalSession] () => ...);
 
 The closest attribute wins: `[WithTransactionalSession]` on an action opts it back in, even if its controller is opted out, and the other way around.
 
-It works on ServiceComposer composition handlers too, on the handler's `Handle` method or on its class. A request runs all the composition handlers of a route in one session, or none, so a route runs without a session only if all its handlers are opted out. Opting out only some of them fails when the endpoints are built:
+It works on ServiceComposer composition handlers too, on the handler's `Handle` method or on its class. For contract-less composition handlers, the class needs ServiceComposer 5.3.1 or 4.3.3, or later; earlier versions only see the method. A request runs all the composition handlers of a route in one session, or none, so a route runs without a session only if all its handlers are opted out. Endpoint-scoped view model factories don't count, since they only create the view model. Opting out only some handlers fails when the endpoints are built:
 
 ```csharp
 public class PaymentWebhookHandler : ICompositionRequestsHandler

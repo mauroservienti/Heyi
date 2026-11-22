@@ -55,14 +55,21 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
 
     // ServiceComposer's endpoint filters see the composition pipeline, not the handlers, so the filter factory's
     // MethodInfo can't tell whether a handler opted out. ServiceComposer's endpoint builder is internal, but exposes
-    // each handler's type and method attributes as a public ComponentsMetadata property. A request runs all the
-    // handlers of a route in one session, or none: the route is opted out only if all its handlers are.
+    // each component's attributes as a public ComponentsMetadata property. A request runs all the handlers of a route
+    // in one session, or none: the route is opted out only if all its handlers are.
     static bool AreCompositionHandlersOptedOut(EndpointBuilder endpointBuilder)
     {
         var property = componentsMetadataProperties.GetOrAdd(endpointBuilder.GetType(), static type =>
             type.GetProperty("ComponentsMetadata", typeof(IList<(Type ComponentType, IList<object> Metadata)>)));
 
-        if (property?.GetValue(endpointBuilder) is not IList<(Type ComponentType, IList<object> Metadata)> { Count: > 0 } handlers)
+        if (property?.GetValue(endpointBuilder) is not IList<(Type ComponentType, IList<object> Metadata)> components)
+        {
+            return false;
+        }
+
+        // Endpoint-scoped view model factories only create the view model, before the handlers run: they don't take part.
+        var handlers = components.Where(component => !IsViewModelFactory(component.ComponentType)).ToList();
+        if (handlers.Count == 0)
         {
             return false;
         }
@@ -85,10 +92,16 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
             "A request runs all the handlers of a route in one transactional session, or none: mark all of them, or none.");
     }
 
-    // The closest attribute wins: the handler method's, then its class'.
-    static bool IsOptedOut(IList<object> methodAttributes, Type componentType)
+    // Heyi doesn't reference ServiceComposer, so the interface is matched by name.
+    static bool IsViewModelFactory(Type componentType) =>
+        componentType.GetInterfaces().Any(type => type.FullName == "ServiceComposer.AspNetCore.IEndpointScopedViewModelFactory");
+
+    // The closest attribute wins: the handler method's, then its class'. Since ServiceComposer 5.3.1 and 4.3.3, a component's
+    // metadata is its class' attributes followed by its method's, also for contract-less handlers, so it's read from the end.
+    // Earlier versions only have the method's attributes, so the class' are read from the component type too.
+    static bool IsOptedOut(IList<object> metadata, Type componentType)
     {
-        foreach (var attributes in new[] { methodAttributes, componentType.GetCustomAttributes(inherit: true) })
+        foreach (var attributes in new[] { metadata.Reverse(), componentType.GetCustomAttributes(inherit: true) })
         {
             foreach (var attribute in attributes)
             {
