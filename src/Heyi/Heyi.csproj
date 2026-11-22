@@ -7,21 +7,11 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Authors>Mauro Servienti</Authors>
     <Description>Atomic, handler-shaped ASP.NET Core endpoints for NServiceBus: store data and send messages as one operation.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageIcon>icon.png</PackageIcon>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>nservicebus;aspnetcore;minimal-api;transactional-session;outbox</PackageTags>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
-    <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <NoWarn>$(NoWarn);NU5105</NoWarn>
-    <PackageOutputPath>..\..\nugets</PackageOutputPath>
   </PropertyGroup>
+
+  <Import Project="..\Heyi.Packaging.props" />
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
@@ -29,25 +19,12 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="[10.0.15, 11.0.0)" />
-    <PackageReference Include="NServiceBus.Persistence.Sql" Version="[9.0.8, 10.0.0)" />
+    <PackageReference Include="NServiceBus.Persistence.Sql" Version="[9.0.7, 10.0.0)" />
     <PackageReference Include="NServiceBus.TransactionalSession" Version="[4.1.0, 5.0.0)" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Heyi.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\assets\icon.png" Pack="true" PackagePath="\" />
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="MinVer" Version="8.0.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="11.0.100" PrivateAssets="All" />
   </ItemGroup>
 
 </Project>
