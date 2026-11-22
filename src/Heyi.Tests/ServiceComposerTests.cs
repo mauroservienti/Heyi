@@ -106,6 +106,105 @@ public class ServiceComposerTests
         Assert.That(app.Session.OpenedWith, Is.Null);
     }
 
+    static Task<TestApp> StartWith(Action<ViewModelCompositionOptions> registerHandlers) =>
+        TestApp.Start(
+            endpoints => endpoints.MapCompositionHandlers().WithTransactionalSession(),
+            configureServices: services =>
+            {
+                services.AddControllers();
+                services.AddViewModelComposition(options =>
+                {
+                    options.AssemblyScanner.Disable();
+                    registerHandlers(options);
+                    options.ResponseSerialization.UseOutputFormatters = true;
+                });
+            });
+
+    [Test]
+    public async Task A_route_whose_handlers_are_all_opted_out_runs_without_a_session()
+    {
+        await using var app = await StartWith(options =>
+        {
+            options.RegisterCompositionHandler<OptedOutWebhookHandler>();
+            options.RegisterCompositionHandler<OptedOutWebhookAuditHandler>();
+        });
+
+        using var response = await app.CreateClient().PostAsync("/webhooks/42", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.OpenedWith, Is.Null);
+    }
+
+    [Test]
+    public async Task A_handler_method_opts_back_in_when_its_class_is_opted_out()
+    {
+        await using var app = await StartWith(options => options.RegisterCompositionHandler<OptedBackInHandler>());
+
+        using var response = await app.CreateClient().PostAsync("/payments/42", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.Committed, Is.True);
+    }
+
+    [Test]
+    public async Task Handlers_of_other_routes_are_unaffected()
+    {
+        await using var app = await StartWith(options =>
+        {
+            options.RegisterCompositionHandler<OptedOutWebhookHandler>();
+            options.RegisterCompositionHandler<SalesHandler>();
+            options.RegisterCompositionHandler<ShippingHandler>();
+        });
+
+        using var response = await app.CreateClient().PostAsync("/orders/42", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(app.Session.Committed, Is.True);
+    }
+
+    [Test]
+    public async Task Opting_out_only_some_handlers_of_a_route_fails()
+    {
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await using var app = await StartWith(options =>
+            {
+                options.RegisterCompositionHandler<OptedOutWebhookHandler>();
+                options.RegisterCompositionHandler<WebhookHandler>();
+            });
+            app.BuildEndpoints();
+        });
+
+        Assert.That(exception!.Message, Does.Contain("OptedOutWebhookHandler").And.Contain("(WebhookHandler)"));
+    }
+
+    class OptedOutWebhookHandler : ICompositionRequestsHandler
+    {
+        [HttpPost("/webhooks/{id}"), WithoutTransactionalSession]
+        public Task Handle(HttpRequest request) => Task.CompletedTask;
+    }
+
+    [WithoutTransactionalSession]
+    class OptedOutWebhookAuditHandler : ICompositionRequestsHandler
+    {
+        [HttpPost("/webhooks/{id}")]
+        public Task Handle(HttpRequest request) => Task.CompletedTask;
+    }
+
+    class WebhookHandler : ICompositionRequestsHandler
+    {
+        [HttpPost("/webhooks/{id}")]
+        public Task Handle(HttpRequest request) => Task.CompletedTask;
+    }
+
+    [WithoutTransactionalSession]
+    class OptedBackInHandler(IOutgoingMessages messages) : ICompositionRequestsHandler
+    {
+        [HttpPost("/payments/{id}"), WithTransactionalSession]
+        public Task Handle(HttpRequest request) =>
+            messages.Send(new SalesCommand((string)request.RouteValues["id"]!));
+    }
+
     class OrderDetailsHandler : ICompositionRequestsHandler
     {
         [HttpGet("/orders/{id}")]

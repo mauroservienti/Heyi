@@ -101,6 +101,16 @@ order.MapPost("/webhook", [WithoutTransactionalSession] () => ...);
 
 The closest attribute wins: `[WithTransactionalSession]` on an action opts it back in, even if its controller is opted out, and the other way around.
 
+It works on ServiceComposer composition handlers too, on the handler's `Handle` method or on its class. A request runs all the composition handlers of a route in one session, or none, so a route runs without a session only if all its handlers are opted out. Opting out only some of them fails when the endpoints are built:
+
+```csharp
+public class PaymentWebhookHandler : ICompositionRequestsHandler
+{
+    [HttpPost("/payments/webhook"), WithoutTransactionalSession]
+    public Task Handle(HttpRequest request) => ...;
+}
+```
+
 ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md) isn't supported: its composition handlers run in an MVC result filter, after the endpoint filter has already committed, so their messages would have no session to go to. Map composition routes with `MapCompositionHandlers()` instead.
 
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.

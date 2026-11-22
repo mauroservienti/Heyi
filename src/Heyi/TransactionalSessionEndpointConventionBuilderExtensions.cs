@@ -1,5 +1,6 @@
 namespace Microsoft.AspNetCore.Builder;
 
+using System.Collections.Concurrent;
 using System.Reflection;
 using Heyi;
 using Microsoft.AspNetCore.Http;
@@ -18,8 +19,8 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
     /// </summary>
     /// <remarks>
     /// To wrap only some controllers or actions, mark them with <see cref="WithTransactionalSessionAttribute"/> instead.
-    /// To leave some out, mark them, or minimal API handlers, with <see cref="WithoutTransactionalSessionAttribute"/>:
-    /// they're checked when the endpoints are built, so they have no per-request cost.
+    /// To leave some out, mark them, minimal API handlers, or ServiceComposer composition handlers, with
+    /// <see cref="WithoutTransactionalSessionAttribute"/>: they're checked when the endpoints are built, so they have no per-request cost.
     /// </remarks>
     /// <param name="builder">The endpoint or route group.</param>
     /// <param name="openSessionOptions">Overrides the open session options registered with <c>AddHeyi</c>.</param>
@@ -28,18 +29,80 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.AddEndpointFilterFactory((context, next) =>
+        builder.Add(endpointBuilder =>
         {
-            if (IsOptedOut(context.MethodInfo))
+            if (AreCompositionHandlersOptedOut(endpointBuilder))
             {
-                return next;
+                return;
             }
 
-            var filter = TransactionalSessionEndpointFilter.Create(context.ApplicationServices, openSessionOptions);
-            return invocationContext => filter.InvokeAsync(invocationContext, next);
+            endpointBuilder.FilterFactories.Add((context, next) =>
+            {
+                if (IsOptedOut(context.MethodInfo))
+                {
+                    return next;
+                }
+
+                var filter = TransactionalSessionEndpointFilter.Create(context.ApplicationServices, openSessionOptions);
+                return invocationContext => filter.InvokeAsync(invocationContext, next);
+            });
         });
 
         return builder;
+    }
+
+    static readonly ConcurrentDictionary<Type, PropertyInfo?> componentsMetadataProperties = new();
+
+    // ServiceComposer's endpoint filters see the composition pipeline, not the handlers, so the filter factory's
+    // MethodInfo can't tell whether a handler opted out. ServiceComposer's endpoint builder is internal, but exposes
+    // each handler's type and method attributes as a public ComponentsMetadata property. A request runs all the
+    // handlers of a route in one session, or none: the route is opted out only if all its handlers are.
+    static bool AreCompositionHandlersOptedOut(EndpointBuilder endpointBuilder)
+    {
+        var property = componentsMetadataProperties.GetOrAdd(endpointBuilder.GetType(), static type =>
+            type.GetProperty("ComponentsMetadata", typeof(IList<(Type ComponentType, IList<object> Metadata)>)));
+
+        if (property?.GetValue(endpointBuilder) is not IList<(Type ComponentType, IList<object> Metadata)> { Count: > 0 } handlers)
+        {
+            return false;
+        }
+
+        var optedOut = handlers.Where(handler => IsOptedOut(handler.Metadata, handler.ComponentType)).Select(handler => handler.ComponentType).ToList();
+        if (optedOut.Count == 0)
+        {
+            return false;
+        }
+
+        if (optedOut.Count == handlers.Count)
+        {
+            return true;
+        }
+
+        var optedIn = handlers.Select(handler => handler.ComponentType).Except(optedOut);
+        throw new InvalidOperationException(
+            $"Some composition handlers of {endpointBuilder.DisplayName} are marked with [WithoutTransactionalSession] " +
+            $"({string.Join(", ", optedOut.Select(type => type.Name))}), and others aren't ({string.Join(", ", optedIn.Select(type => type.Name))}). " +
+            "A request runs all the handlers of a route in one transactional session, or none: mark all of them, or none.");
+    }
+
+    // The closest attribute wins: the handler method's, then its class'.
+    static bool IsOptedOut(IList<object> methodAttributes, Type componentType)
+    {
+        foreach (var attributes in new[] { methodAttributes, componentType.GetCustomAttributes(inherit: true) })
+        {
+            foreach (var attribute in attributes)
+            {
+                switch (attribute)
+                {
+                    case WithoutTransactionalSessionAttribute:
+                        return true;
+                    case WithTransactionalSessionAttribute:
+                        return false;
+                }
+            }
+        }
+
+        return false;
     }
 
     // The closest attribute wins: the method's, then its controller's. For controllers, ReflectedType is the controller,
