@@ -103,7 +103,16 @@ The closest attribute wins: `[WithTransactionalSession]` on an action opts it ba
 
 Neither attribute works on ServiceComposer composition handlers: a request runs all the composition handlers of a route in one session, and `MapCompositionHandlers().WithTransactionalSession()` can't tell them apart. Marking any fails when the endpoints are built, instead of being silently ignored.
 
-ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md) isn't supported: its composition handlers run in an MVC result filter, after the endpoint filter has already committed, so their messages would have no session to go to. Map composition routes with `MapCompositionHandlers()` instead.
+With ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md), the composition handlers run in an endpoint filter right after the controller action, so `WithTransactionalSession()` on the controllers wraps the action and the handlers in one session. It needs `WithCompositionOverControllers()`, from ServiceComposer 5.3: `EnableCompositionOverControllers()` runs the handlers in an MVC result filter, after the session has committed.
+
+```csharp
+app.MapControllers()
+    .WithTransactionalSession()
+    .WithCompositionOverControllers();
+app.MapCompositionHandlers();
+```
+
+Call `WithCompositionOverControllers()` last: ServiceComposer's composition filter must be the innermost one. `[WithoutTransactionalSession]` and `[WithTransactionalSession]` apply to the controller and its actions only: on composition handlers composing over a controller, they're ignored.
 
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.
 
