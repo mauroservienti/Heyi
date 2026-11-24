@@ -106,6 +106,56 @@ public class ServiceComposerTests
         Assert.That(app.Session.OpenedWith, Is.Null);
     }
 
+    static Task<TestApp> StartWith<THandler>() where THandler : ICompositionRequestsHandler =>
+        TestApp.Start(
+            endpoints => endpoints.MapCompositionHandlers().WithTransactionalSession(),
+            configureServices: services =>
+            {
+                services.AddControllers();
+                services.AddViewModelComposition(options =>
+                {
+                    options.AssemblyScanner.Disable();
+                    options.RegisterCompositionHandler<THandler>();
+                });
+            });
+
+    [Test]
+    public async Task Composition_handlers_marked_on_their_method_fail()
+    {
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await using var app = await StartWith<MarkedOnMethodWebhookHandler>();
+            app.BuildEndpoints();
+        });
+
+        Assert.That(exception!.Message, Does.Contain("webhooks/{id}").And.Contain("Remove the attributes"));
+    }
+
+    [Test]
+    public async Task Composition_handlers_marked_on_their_class_fail()
+    {
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await using var app = await StartWith<MarkedOnClassWebhookHandler>();
+            app.BuildEndpoints();
+        });
+
+        Assert.That(exception!.Message, Does.Contain("webhooks/{id}"));
+    }
+
+    class MarkedOnMethodWebhookHandler : ICompositionRequestsHandler
+    {
+        [HttpPost("/webhooks/{id}"), WithoutTransactionalSession]
+        public Task Handle(HttpRequest request) => Task.CompletedTask;
+    }
+
+    [WithoutTransactionalSession]
+    class MarkedOnClassWebhookHandler : ICompositionRequestsHandler
+    {
+        [HttpPost("/webhooks/{id}")]
+        public Task Handle(HttpRequest request) => Task.CompletedTask;
+    }
+
     class OrderDetailsHandler : ICompositionRequestsHandler
     {
         [HttpGet("/orders/{id}")]
