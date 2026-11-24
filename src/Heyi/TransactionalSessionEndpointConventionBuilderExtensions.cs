@@ -19,8 +19,8 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
     /// <remarks>
     /// To wrap only some controllers or actions, mark them with <see cref="WithTransactionalSessionAttribute"/> instead.
     /// To leave some out, mark them, or minimal API handlers, with <see cref="WithoutTransactionalSessionAttribute"/>:
-    /// they're checked when the endpoints are built, so they have no per-request cost. ServiceComposer composition handlers
-    /// can't be marked: marking any fails when the endpoints are built.
+    /// they're checked when the endpoints are built, so they have no per-request cost. For ServiceComposer composition
+    /// handlers, reference the Heyi.ServiceComposer package, which honors the attributes on them.
     /// </remarks>
     /// <param name="builder">The endpoint or route group.</param>
     /// <param name="openSessionOptions">Overrides the open session options registered with <c>AddHeyi</c>.</param>
@@ -32,26 +32,15 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
         builder.Add(endpointBuilder =>
         {
             ThrowIfCompositionHandlersAreMarked(endpointBuilder);
-
-            endpointBuilder.FilterFactories.Add((context, next) =>
-            {
-                if (IsOptedOut(context.MethodInfo))
-                {
-                    return next;
-                }
-
-                var filter = TransactionalSessionEndpointFilter.Create(context.ApplicationServices, openSessionOptions);
-                return invocationContext => filter.InvokeAsync(invocationContext, next);
-            });
+            TransactionalSessionEndpointFilters.Add(endpointBuilder, openSessionOptions);
         });
 
         return builder;
     }
 
     // ServiceComposer merges the attributes of all the composition handlers of a route into the endpoint metadata, but
-    // the filter factory only sees the composition pipeline, so it can't honor them, and ignoring them would silently open
-    // sessions on routes meant to run without one. Heyi doesn't reference ServiceComposer, so its endpoint builder is
-    // matched by name.
+    // the filter factory only sees the composition pipeline, so it can't honor them: Heyi.ServiceComposer does. Heyi doesn't
+    // reference ServiceComposer, so its endpoint builder is matched by name.
     static void ThrowIfCompositionHandlersAreMarked(EndpointBuilder endpointBuilder)
     {
         if (endpointBuilder.GetType().FullName != "ServiceComposer.AspNetCore.CompositionEndpointBuilder"
@@ -62,9 +51,22 @@ public static class TransactionalSessionEndpointConventionBuilderExtensions
 
         throw new InvalidOperationException(
             $"Composition handlers of {endpointBuilder.DisplayName} are marked with [WithTransactionalSession] or [WithoutTransactionalSession], " +
-            "which aren't supported on composition handlers: a request runs all the composition handlers of a route in one transactional session, " +
-            "and WithTransactionalSession() can't tell them apart. Remove the attributes.");
+            "which WithTransactionalSession() can't honor on composition handlers without the Heyi.ServiceComposer package. " +
+            "Remove the attributes, or reference Heyi.ServiceComposer, which needs ServiceComposer 6.0 or later, and call WithTransactionalSession() " +
+            "on MapCompositionHandlers(), not on a route group.");
     }
+
+    internal static void AddFilter(EndpointBuilder endpointBuilder, Func<OpenSessionOptions>? openSessionOptions) =>
+        endpointBuilder.FilterFactories.Add((context, next) =>
+        {
+            if (IsOptedOut(context.MethodInfo))
+            {
+                return next;
+            }
+
+            var filter = TransactionalSessionEndpointFilter.Create(context.ApplicationServices, openSessionOptions);
+            return invocationContext => filter.InvokeAsync(invocationContext, next);
+        });
 
     // The closest attribute wins: the method's, then its controller's. For controllers, ReflectedType is the controller,
     // also for actions inherited from a base class.

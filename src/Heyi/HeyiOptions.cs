@@ -10,7 +10,11 @@ public sealed class HeyiOptions
 {
     internal Func<OpenSessionOptions>? OpenSessionOptionsFactory { get; private set; }
 
-    internal bool SafeMethodsUseSessions { get; private set; }
+    /// <summary>
+    /// Whether endpoints for safe methods (<c>GET</c>, <c>HEAD</c>, <c>OPTIONS</c>, <c>TRACE</c>) run in a transactional session,
+    /// set with <see cref="OpenSessionsForSafeMethods"/>.
+    /// </summary>
+    public bool SafeMethodsUseSessions { get; private set; }
 
     internal Func<HttpContext, string?>? IdempotencyKeyScope { get; private set; }
 
