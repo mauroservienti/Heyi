@@ -8,8 +8,8 @@ using Microsoft.AspNetCore.Mvc.Filters;
 /// </summary>
 /// <remarks>
 /// The closest attribute wins: <see cref="WithTransactionalSessionAttribute"/> on an action opts it back in, even if
-/// its controller is opted out, and the other way around. ServiceComposer composition handlers can't be opted out:
-/// the endpoint filter sees the composition pipeline, not the handlers, so marking them fails when the endpoints are built.
+/// its controller is opted out, and the other way around. ServiceComposer composition handlers can be opted out with
+/// the Heyi.ServiceComposer package: the endpoint filter sees the composition pipeline, not the handlers.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = true)]
 public sealed class WithoutTransactionalSessionAttribute : Attribute, ITransactionalSessionPolicy

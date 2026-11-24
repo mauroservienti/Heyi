@@ -51,7 +51,7 @@ order.MapPost("/returns", ...);
 
 The open session options can be overridden per endpoint, by passing them to `WithTransactionalSession`.
 
-It works with anything that runs endpoint filters. MVC controllers run them too: inject `IOutgoingMessages` into the controller, and results such as `BadRequest()` or `NotFound()` roll back like any other `4xx`. With [ServiceComposer](https://github.com/ServiceComposer/ServiceComposer.AspNetCore), all the composition handlers of a request send through the same session, and commit or roll back together.
+It works with anything that runs endpoint filters. MVC controllers run them too: inject `IOutgoingMessages` into the controller, and results such as `BadRequest()` or `NotFound()` roll back like any other `4xx`. With [ServiceComposer](https://github.com/ServiceComposer/ServiceComposer.AspNetCore), all the composition handlers of a request send through the same session, and commit or roll back together. For composition handlers, add the [Heyi.ServiceComposer](https://www.nuget.org/packages/Heyi.ServiceComposer) package too, which honors `[WithoutTransactionalSession]` on them: see [composition handlers](#composition-handlers).
 
 ```csharp
 app.MapControllers().WithTransactionalSession();
@@ -101,13 +101,31 @@ order.MapPost("/webhook", [WithoutTransactionalSession] () => ...);
 
 The closest attribute wins: `[WithTransactionalSession]` on an action opts it back in, even if its controller is opted out, and the other way around.
 
-Neither attribute works on ServiceComposer composition handlers: a request runs all the composition handlers of a route in one session, and `MapCompositionHandlers().WithTransactionalSession()` can't tell them apart. Marking any fails when the endpoints are built, instead of being silently ignored.
-
-ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md) isn't supported: its composition handlers run in an MVC result filter, after the endpoint filter has already committed, so their messages would have no session to go to. Map composition routes with `MapCompositionHandlers()` instead.
-
 Heyi checks its prerequisites when the endpoints are built, and fails fast with a clear message if `AddHeyi` is missing, the transactional session isn't enabled, or no open session options are configured.
 
 Web applications are usually send-only endpoints, which requires a [remote processor endpoint](https://docs.particular.net/nservicebus/transactional-session/#remote-processor) with the outbox and the transactional session enabled.
+
+### Composition handlers
+
+`Heyi.ServiceComposer` needs ServiceComposer 6.0 or later: `dotnet add package Heyi.ServiceComposer`. It ships with Heyi, with the same version. With it, `MapCompositionHandlers().WithTransactionalSession()` honors `[WithoutTransactionalSession]` on composition handlers, on the handler's method or on its class, contract-less handlers included:
+
+```csharp
+public class PaymentWebhookHandler : ICompositionRequestsHandler
+{
+    [HttpPost("/payments/webhook"), WithoutTransactionalSession]
+    public Task Handle(HttpRequest request) => ...;
+}
+```
+
+A request runs all the composition handlers of a route in one session, or none:
+
+- A route runs without a session only if all its handlers and route-scoped subscribers are opted out. Opting out only some of them fails when the endpoints are built, naming them, unless the route runs without a session anyway, like reads do by default.
+- Endpoint-scoped view model factories don't count, since they only create the view model.
+- `ICompositionEventsHandler<T>` handlers run in the session of the request raising the event, whatever their attributes: they aren't tied to a route.
+
+Without the package, `WithTransactionalSession()` still wraps composition endpoints, but can't honor the attributes on composition handlers: marking any fails when the endpoints are built. So does marking composition handlers mapped in a route group made transactional with `MapGroup(...).WithTransactionalSession()`: call `WithTransactionalSession()` on `MapCompositionHandlers()` instead.
+
+ServiceComposer's [composition over controllers](https://github.com/ServiceComposer/ServiceComposer.AspNetCore/blob/master/docs/composition-over-controllers.md) isn't supported: its composition handlers run in an MVC result filter, after the endpoint filter has already committed, so their messages would have no session to go to. Map composition routes with `MapCompositionHandlers()` instead.
 
 ## Accept-only endpoints
 
@@ -218,6 +236,7 @@ NServiceBus traces sends and publishes, and measures commits. Heyi adds what onl
 - .NET 10
 - NServiceBus 10 with the transactional session
 - NServiceBus SQL persistence, for the EF Core integration
+- ServiceComposer 6.0 or later, for `Heyi.ServiceComposer`
 
 ## License
 

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Description>Heyi for ServiceComposer: wraps composition handlers in an NServiceBus transactional session, and honors [WithoutTransactionalSession] on them.</Description>
+    <PackageTags>nservicebus;aspnetcore;servicecomposer;viewmodel-composition;transactional-session;outbox</PackageTags>
+  </PropertyGroup>
+
+  <Import Project="..\Heyi.Packaging.props" />
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ServiceComposer.AspNetCore" Version="[6.0.0, 7.0.0)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heyi\Heyi.csproj" />
+  </ItemGroup>
+
+</Project>

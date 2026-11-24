@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Heyi.AcceptanceTests/Heyi.AcceptanceTests.csproj" />
+  <Project Path="Heyi.ServiceComposer/Heyi.ServiceComposer.csproj" />
   <Project Path="Heyi.Tests/Heyi.Tests.csproj" />
   <Project Path="Heyi/Heyi.csproj" />
 </Solution>
